@@ -42,6 +42,16 @@
 
 ## Build
 
+### One-click .exe
+
+```
+dotnet publish WifiSpeedWidget -c Release -r win-x64 --self-contained true
+```
+
+This produces a single `WifiSpeedWidget.exe` under `WifiSpeedWidget\bin\Release\net10.0-windows\win-x64\publish\`. It runs on its own, no .NET install needed on the target PC. Copy it anywhere and double-click it, or create a shortcut to it.
+
+### Developing
+
 Requires the .NET 10 SDK. Open `WifiSpeedWidget.slnx` in Visual Studio and press F5, or run:
 
 ```
