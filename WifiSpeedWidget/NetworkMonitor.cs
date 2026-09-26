@@ -1,6 +1,6 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Net.NetworkInformation;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -15,6 +15,9 @@ public sealed class NetworkMonitor
     private long _lastTx;
     private DateTime _lastSample;
     private DateTime _lastAdapterScan = DateTime.MinValue;
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetOEMCP();
 
     static NetworkMonitor()
     {
@@ -106,7 +109,7 @@ public sealed class NetworkMonitor
                 RedirectStandardOutput = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.GetEncoding(CultureInfo.CurrentCulture.TextInfo.OEMCodePage)
+                StandardOutputEncoding = Encoding.GetEncoding((int)GetOEMCP())
             };
             using var proc = Process.Start(psi);
             if (proc == null) return null;
