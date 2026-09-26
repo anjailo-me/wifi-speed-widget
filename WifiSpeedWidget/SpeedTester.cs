@@ -39,20 +39,29 @@ public sealed class SpeedTester
 
     private static async Task<double> MeasurePingAsync(IProgress<TestProgress> progress, CancellationToken ct)
     {
-        const int rounds = 8;
+        const int rounds = 6;
         var samples = new List<double>();
+        Exception? lastError = null;
         for (var i = 0; i < rounds; i++)
         {
-            var sw = Stopwatch.StartNew();
-            using (var resp = await Http.GetAsync(DownUrl + "0", HttpCompletionOption.ResponseHeadersRead, ct))
+            try
             {
-                resp.EnsureSuccessStatusCode();
+                var sw = Stopwatch.StartNew();
+                using (var resp = await Http.GetAsync(DownUrl + "0", HttpCompletionOption.ResponseHeadersRead, ct))
+                {
+                    resp.EnsureSuccessStatusCode();
+                }
+                sw.Stop();
+                if (i > 0) samples.Add(sw.Elapsed.TotalMilliseconds);
             }
-            sw.Stop();
-            if (i > 0) samples.Add(sw.Elapsed.TotalMilliseconds);
+            catch (Exception ex) when (ex is HttpRequestException or IOException && !ct.IsCancellationRequested)
+            {
+                lastError = ex;
+            }
             var current = samples.Count > 0 ? samples.Min() : 0;
             progress.Report(new TestProgress(TestPhase.Ping, current, (i + 1.0) / rounds));
         }
+        if (samples.Count == 0) throw lastError ?? new HttpRequestException("No latency samples");
         return samples.Min();
     }
 
@@ -132,7 +141,7 @@ public sealed class SpeedTester
         {
             while (!ct.IsCancellationRequested)
             {
-                using var content = new CountingContent(8 * 1024 * 1024, counter);
+                using var content = new CountingContent(32 * 1024 * 1024, counter);
                 using var resp = await Http.PostAsync(UpUrl, content, ct);
             }
         }

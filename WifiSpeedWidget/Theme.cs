@@ -100,6 +100,34 @@ internal static class Native
     [DllImport("user32.dll")]
     private static extern int SetWindowLong(IntPtr hwnd, int index, int value);
 
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rect);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(NativePoint point, uint flags);
+
+    private struct NativeRect
+    {
+        public int Left, Top, Right, Bottom;
+    }
+
+    private struct NativePoint
+    {
+        public int X, Y;
+    }
+
+    public static (int X, int Y)? GetPosition(IntPtr hwnd) =>
+        GetWindowRect(hwnd, out var r) ? (r.Left, r.Top) : null;
+
+    public static bool TryMove(IntPtr hwnd, int x, int y)
+    {
+        if (MonitorFromPoint(new NativePoint { X = x + 40, Y = y + 20 }, 0) == IntPtr.Zero) return false;
+        return SetWindowPos(hwnd, IntPtr.Zero, x, y, 0, 0, 0x0001 | 0x0004 | 0x0010);
+    }
+
     public static void MakeToolWindow(IntPtr hwnd)
     {
         var ex = GetWindowLong(hwnd, GwlExStyle);

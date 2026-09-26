@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Http;
 using System.Net.NetworkInformation;
 using System.Windows;
 using System.Windows.Controls;
@@ -27,7 +29,8 @@ public partial class MainWindow : Window
     private DateTime? _nextTestAt;
     private PingStats? _lastPing;
     private string? _wifiDetail;
-    private bool _lastTestFailed;
+    private string? _failureText;
+    private int _busyStrikes;
     private bool _pinging;
 
     public MainWindow()
@@ -35,7 +38,9 @@ public partial class MainWindow : Window
         InitializeComponent();
 
         Topmost = _settings.Topmost;
-        RestorePlacement();
+        var area = SystemParameters.WorkArea;
+        Left = area.Right - Width - 16;
+        Top = area.Top + 16;
         ShowLastResult();
         UpdateScheduleText();
 
@@ -54,7 +59,6 @@ public partial class MainWindow : Window
             await UpdateWifiAsync();
             await UpdatePingAsync();
         };
-        LocationChanged += (_, _) => SavePlacement();
         Closing += (_, _) =>
         {
             _testCts?.Cancel();
@@ -86,6 +90,7 @@ public partial class MainWindow : Window
         base.OnSourceInitialized(e);
         var hwnd = new WindowInteropHelper(this).Handle;
         Native.MakeToolWindow(hwnd);
+        if (_settings.WindowX is { } x && _settings.WindowY is { } y) Native.TryMove(hwnd, x, y);
         ApplyFrame();
     }
 
@@ -101,39 +106,20 @@ public partial class MainWindow : Window
         DrawHistory();
     }
 
-    private void RestorePlacement()
-    {
-        var area = SystemParameters.WorkArea;
-        if (_settings.Left is { } left && _settings.Top is { } top
-            && left >= SystemParameters.VirtualScreenLeft - 100
-            && top >= SystemParameters.VirtualScreenTop - 20
-            && left <= SystemParameters.VirtualScreenLeft + SystemParameters.VirtualScreenWidth - 100
-            && top <= SystemParameters.VirtualScreenTop + SystemParameters.VirtualScreenHeight - 60)
-        {
-            Left = left;
-            Top = top;
-        }
-        else
-        {
-            Left = area.Right - Width - 16;
-            Top = area.Top + 16;
-        }
-    }
-
     private void SavePlacement()
     {
-        if (WindowState != WindowState.Normal) return;
-        _settings.Left = Left;
-        _settings.Top = Top;
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero || Native.GetPosition(hwnd) is not { } p) return;
+        _settings.WindowX = p.X;
+        _settings.WindowY = p.Y;
         _settings.Save();
     }
 
     private void OnDrag(object sender, MouseButtonEventArgs e)
     {
-        if (e.ButtonState == MouseButtonState.Pressed)
-        {
-            try { DragMove(); } catch (InvalidOperationException) { }
-        }
+        if (e.ButtonState != MouseButtonState.Pressed) return;
+        try { DragMove(); } catch (InvalidOperationException) { }
+        SavePlacement();
     }
 
     private async void OnClockTick()
@@ -172,8 +158,8 @@ public partial class MainWindow : Window
 
     private void UpdateStatusLine()
     {
-        if (_lastTestFailed)
-            StatusLine.Text = "Couldn't reach the test server";
+        if (_failureText != null)
+            StatusLine.Text = _failureText;
         else if (_settings.LastRun is { } last)
             StatusLine.Text = $"Tested {Relative(last)}";
         else
@@ -238,7 +224,9 @@ public partial class MainWindow : Window
         try
         {
             var result = await _tester.RunAsync(new Progress<TestProgress>(OnTestProgress), _testCts.Token);
-            _lastTestFailed = false;
+            _failureText = null;
+            _busyStrikes = 0;
+            StatusLine.ToolTip = null;
             _settings.LastPing = result.PingMs;
             _settings.LastDown = result.DownloadMbps;
             _settings.LastUp = result.UploadMbps;
@@ -252,11 +240,20 @@ public partial class MainWindow : Window
         {
             cancelled = true;
         }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
+        {
+            failed = true;
+            _busyStrikes++;
+            _failureText = "Test server is busy, waiting before the next test";
+            StatusLine.ToolTip = "The speed test server asked for fewer requests. The widget backs off automatically.";
+            WidgetSettings.LogError(ex);
+        }
         catch (Exception ex)
         {
             failed = true;
-            _lastTestFailed = true;
-            System.Diagnostics.Debug.WriteLine(ex);
+            _failureText = "Couldn't reach the test server";
+            StatusLine.ToolTip = ex.Message;
+            WidgetSettings.LogError(ex);
         }
         finally
         {
@@ -330,6 +327,11 @@ public partial class MainWindow : Window
             delay = TimeSpan.FromSeconds(Math.Min(60, minutes * 60));
         else
             delay = TimeSpan.FromMinutes(minutes);
+        if (_busyStrikes > 0)
+        {
+            var backoff = TimeSpan.FromMinutes(Math.Min(30, Math.Pow(2, _busyStrikes)));
+            if (backoff > delay) delay = backoff;
+        }
         ScheduleNextTest(delay);
     }
 

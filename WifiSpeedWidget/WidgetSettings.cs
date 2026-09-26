@@ -14,8 +14,8 @@ public sealed class WidgetSettings
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string RunName = "WifiSpeedWidget";
 
-    public double? Left { get; set; }
-    public double? Top { get; set; }
+    public int? WindowX { get; set; }
+    public int? WindowY { get; set; }
     public bool Topmost { get; set; } = true;
     public double? LastPing { get; set; }
     public double? LastDown { get; set; }
@@ -31,8 +31,10 @@ public sealed class WidgetSettings
             if (File.Exists(FilePath))
                 return JsonSerializer.Deserialize<WidgetSettings>(File.ReadAllText(FilePath)) ?? new WidgetSettings();
         }
-        catch
+        catch (Exception ex)
         {
+            LogError(ex);
+            try { File.Copy(FilePath, FilePath + ".bak", true); } catch { }
         }
         return new WidgetSettings();
     }
@@ -43,6 +45,20 @@ public sealed class WidgetSettings
         {
             Directory.CreateDirectory(Folder);
             File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch
+        {
+        }
+    }
+
+    public static void LogError(Exception ex)
+    {
+        try
+        {
+            Directory.CreateDirectory(Folder);
+            var path = Path.Combine(Folder, "errors.log");
+            if (File.Exists(path) && new FileInfo(path).Length > 256 * 1024) File.Delete(path);
+            File.AppendAllText(path, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}{Environment.NewLine}{Environment.NewLine}");
         }
         catch
         {
