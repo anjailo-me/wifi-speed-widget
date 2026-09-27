@@ -6,6 +6,11 @@
 
 <p align="center">A small, draggable Windows desktop widget that keeps testing your connection.</p>
 
+<p align="center">
+  <a href="https://github.com/anjailo-me/wifi-speed-widget/releases/latest">Download the latest .exe</a>
+  · no install, no .NET required, just run it
+</p>
+
 ![Wi-Fi Speed Widget](docs/images/00-cover.png)
 
 ## Guide
@@ -42,21 +47,19 @@
 
 ## Build
 
-### One-click .exe
+Requires the .NET 10 SDK. Open `WifiSpeedWidget.slnx` in Visual Studio and press F5, or run:
+
+```
+dotnet run --project WifiSpeedWidget
+```
+
+To build your own one-click .exe instead of using a [release](https://github.com/anjailo-me/wifi-speed-widget/releases/latest):
 
 ```
 dotnet publish WifiSpeedWidget -c Release -r win-x64 --self-contained true
 ```
 
 This produces a single `WifiSpeedWidget.exe` under `WifiSpeedWidget\bin\Release\net10.0-windows\win-x64\publish\`. It runs on its own, no .NET install needed on the target PC. Copy it anywhere and double-click it, or create a shortcut to it.
-
-### Developing
-
-Requires the .NET 10 SDK. Open `WifiSpeedWidget.slnx` in Visual Studio and press F5, or run:
-
-```
-dotnet run --project WifiSpeedWidget
-```
 
 ## Notes
 
