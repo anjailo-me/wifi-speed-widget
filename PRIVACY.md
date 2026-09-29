@@ -1,6 +1,6 @@
 # Speedline privacy policy
 
-Last updated: 29 September 2026
+Last updated: 30 September 2026
 
 Speedline is a small Windows widget that tests your internet speed and shows the quality of your connection. This page explains what it does with your information. The short version: Speedline has no accounts, no ads and no analytics, and it does not send anything to the developer.
 
@@ -31,4 +31,4 @@ If this policy changes, the new version will be published at the same address wi
 
 ## Contact
 
-[Add your contact email address here before publishing this page.]
+Questions about this policy: jai.ang.me@gmail.com
