@@ -10,6 +10,10 @@ public static class AppInfo
 {
     public static string Name { get; } =
         Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyProductAttribute>()?.Product ?? "Speedline";
+
+    public static string PrivacyUrl { get; } =
+        Assembly.GetExecutingAssembly().GetCustomAttributes<AssemblyMetadataAttribute>()
+            .FirstOrDefault(a => a.Key == "PrivacyPolicyUrl")?.Value ?? "";
 }
 
 internal static class Platform

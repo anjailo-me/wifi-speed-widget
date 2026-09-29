@@ -3,6 +3,7 @@ param(
     [string]$Publisher = "CN=Speedline",
     [string]$PublisherDisplayName = "Speedline",
     [string]$DisplayName = "Speedline",
+    [string]$PrivacyUrl = "",
     [string]$Version = "1.1.0.0",
     [string]$OutDir = (Join-Path $PSScriptRoot "..\dist")
 )
@@ -49,7 +50,7 @@ New-Item -ItemType Directory -Force $layout | Out-Null
 
 $assemblyVersion = $Version -replace '\.0$', ''
 dotnet publish $project -c Release -r win-x64 --self-contained true `
-    "-p:AppDisplayName=$DisplayName" "-p:Version=$assemblyVersion" `
+    "-p:AppDisplayName=$DisplayName" "-p:Version=$assemblyVersion" "-p:PrivacyPolicyUrl=$PrivacyUrl" `
     -p:DebugType=none -p:DebugSymbols=false -o $layout
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 

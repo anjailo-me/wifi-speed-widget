@@ -21,13 +21,49 @@ public sealed class WidgetSettings
     public double? LastDown { get; set; }
     public double? LastUp { get; set; }
     public DateTime? LastRun { get; set; }
-    public int AutoTestMinutes { get; set; } = 15;
+    public int AutoTestMinutes { get; set; } = 360;
     public List<TestRecord> History { get; set; } = new();
+    public List<DateTime> TestStarts { get; set; } = new();
 
-    private static readonly int[] AllowedIntervals = { 0, 5, 15, 30, 60 };
+    public const int DailyTestLimit = 40;
+    public const int AutoDailyLimit = 30;
 
-    private static int NormalizeInterval(int minutes) =>
-        Array.IndexOf(AllowedIntervals, minutes) >= 0 ? minutes : minutes is < 0 or 1 ? 5 : 15;
+    private static readonly int[] AllowedIntervals = { 0, 180, 360, 720 };
+
+    private static int NormalizeInterval(int minutes)
+    {
+        if (Array.IndexOf(AllowedIntervals, minutes) >= 0) return minutes;
+        if (minutes < 0) return 180;
+        return AllowedIntervals.Where(a => a > 0)
+            .OrderBy(a => Math.Abs(a - minutes))
+            .ThenByDescending(a => a)
+            .First();
+    }
+
+    public int TestsInLastDay()
+    {
+        PruneStarts();
+        return TestStarts.Count;
+    }
+
+    public DateTime? NextTestSlotAt()
+    {
+        PruneStarts();
+        return TestStarts.Count == 0 ? null : TestStarts.Min().ToUniversalTime().AddHours(24);
+    }
+
+    public void RecordTestStart()
+    {
+        PruneStarts();
+        TestStarts.Add(DateTime.UtcNow);
+    }
+
+    private void PruneStarts()
+    {
+        TestStarts ??= new List<DateTime>();
+        var cutoff = DateTime.UtcNow.AddHours(-24);
+        TestStarts.RemoveAll(t => t.ToUniversalTime() < cutoff);
+    }
 
     public static WidgetSettings Load()
     {
@@ -37,6 +73,8 @@ public sealed class WidgetSettings
             {
                 var loaded = JsonSerializer.Deserialize<WidgetSettings>(File.ReadAllText(FilePath)) ?? new WidgetSettings();
                 loaded.AutoTestMinutes = NormalizeInterval(loaded.AutoTestMinutes);
+                loaded.History ??= new List<TestRecord>();
+                loaded.PruneStarts();
                 return loaded;
             }
         }

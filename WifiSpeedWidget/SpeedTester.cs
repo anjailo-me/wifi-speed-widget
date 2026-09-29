@@ -23,6 +23,8 @@ public sealed class SpeedTester
     private static readonly string ClientVersion =
         typeof(SpeedTester).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
 
+    private static string LocateBase = "https://locate.measurementlab.net/v2/nearest/ndt/ndt7";
+
     private static readonly HttpClient Http = CreateHttpClient();
 
     private sealed record Target(Uri Download, Uri Upload);
@@ -90,7 +92,7 @@ public sealed class SpeedTester
 
     private static async Task<List<Target>> LocateAsync(CancellationToken ct)
     {
-        var url = $"https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name={ClientName}&client_version={ClientVersion}";
+        var url = $"{LocateBase}?client_name={ClientName}&client_version={ClientVersion}";
         string body;
         try
         {

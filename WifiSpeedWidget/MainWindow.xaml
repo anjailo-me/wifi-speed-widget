@@ -51,6 +51,9 @@
             <MenuItem x:Name="StartupItem" Header="Start with Windows" IsCheckable="True" Click="OnToggleStartup"/>
             <Separator/>
             <MenuItem Header="Clear history" Click="OnClearHistory"/>
+            <Separator/>
+            <MenuItem x:Name="PrivacyItem" Header="Privacy policy" Click="OnPrivacy"/>
+            <MenuItem Header="About" Click="OnAbout"/>
             <MenuItem Header="Close widget" Click="OnClose"/>
         </ContextMenu>
     </Window.ContextMenu>
@@ -82,8 +85,8 @@
                 </StackPanel>
             </StackPanel>
             <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Top" Margin="8,-4,-8,0" Style="{StaticResource RevealOnHover}">
-                <Button x:Name="MoreButton" Style="{StaticResource IconButton}" Content="&#xE712;" ToolTip="More options" Click="OnMore"/>
-                <Button Style="{StaticResource IconButton}" Content="&#xE711;" ToolTip="Close" Click="OnClose"/>
+                <Button x:Name="MoreButton" Style="{StaticResource IconButton}" Content="&#xE712;" ToolTip="More options" AutomationProperties.Name="More options" Click="OnMore"/>
+                <Button Style="{StaticResource IconButton}" Content="&#xE711;" ToolTip="Close" AutomationProperties.Name="Close" Click="OnClose"/>
             </StackPanel>
         </Grid>
 
@@ -141,18 +144,17 @@
             <StackPanel VerticalAlignment="Center">
                 <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}" Typography.NumeralAlignment="Tabular" ToolTip="Network activity on this PC right now"><Run Text="&#xE74B;" FontFamily="{StaticResource IconFont}" FontSize="10" Foreground="{DynamicResource TextTertiary}"/><Run Text=" "/><Run x:Name="LiveDown" Text="0 Kbps"/><Run Text="     "/><Run Text="&#xE74A;" FontFamily="{StaticResource IconFont}" FontSize="10" Foreground="{DynamicResource TextTertiary}"/><Run Text=" "/><Run x:Name="LiveUp" Text="0 Kbps"/></TextBlock>
                 <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
-                    <Button x:Name="ScheduleButton" Style="{StaticResource LinkButton}" Click="OnScheduleClick" ToolTip="How often to test automatically">
+                    <Button x:Name="ScheduleButton" Style="{StaticResource LinkButton}" Click="OnScheduleClick" ToolTip="How often to run a speed test automatically. Kept low to respect the free Measurement Lab service.">
                         <Button.ContextMenu>
                             <ContextMenu x:Name="ScheduleMenu" Placement="Top">
-                                <MenuItem Header="Every 5 minutes" Tag="5" IsCheckable="True" Click="OnAutoInterval"/>
-                                <MenuItem Header="Every 15 minutes" Tag="15" IsCheckable="True" Click="OnAutoInterval"/>
-                                <MenuItem Header="Every 30 minutes" Tag="30" IsCheckable="True" Click="OnAutoInterval"/>
-                                <MenuItem Header="Every hour" Tag="60" IsCheckable="True" Click="OnAutoInterval"/>
+                                <MenuItem Header="Every 3 hours" Tag="180" IsCheckable="True" Click="OnAutoInterval"/>
+                                <MenuItem Header="Every 6 hours" Tag="360" IsCheckable="True" Click="OnAutoInterval"/>
+                                <MenuItem Header="Every 12 hours" Tag="720" IsCheckable="True" Click="OnAutoInterval"/>
                                 <Separator/>
                                 <MenuItem Header="Off" Tag="0" IsCheckable="True" Click="OnAutoInterval"/>
                             </ContextMenu>
                         </Button.ContextMenu>
-                        <TextBlock><Run x:Name="ScheduleText" Text="Every 15 min"/><Run Text="  "/><Run Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="8"/></TextBlock>
+                        <TextBlock><Run x:Name="ScheduleText" Text="Every 6 hours"/><Run Text="  "/><Run Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="8"/></TextBlock>
                     </Button>
                     <TextBlock x:Name="NextText" Text="" FontSize="12" Foreground="{DynamicResource TextTertiary}" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular"/>
                 </StackPanel>

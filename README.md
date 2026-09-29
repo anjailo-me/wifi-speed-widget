@@ -28,7 +28,7 @@
 
 ## Features
 
-- Automatic speed tests every 5, 15, 30 or 60 minutes, or only on demand
+- Automatic speed tests every 3, 6 (default) or 12 hours at slightly randomized times, or only on demand
 - Live ping, jitter and packet loss with a connection rating
 - Wi-Fi network name, band and signal strength
 - History of recent test results
@@ -59,10 +59,15 @@ dotnet publish WifiSpeedWidget -c Release -r win-x64 --self-contained true -p:Pu
 
 To build the package for the Store, see [STORE.md](STORE.md).
 
+## Checks
+
+An automated kit runs the real code and drives the real widget window. It tests speed measurement against a local stand-in for the M-Lab service, so it does not use up the daily limit, and it can also run against the real service. See [tests](tests/README.md).
+
 ## How it works
 
 - Speed tests use [Measurement Lab](https://www.measurementlab.net/) (M-Lab) and its open ndt7 protocol. M-Lab publishes the results of tests as open data, including the IP address used. See [PRIVACY.md](PRIVACY.md).
 - Ping, jitter and packet loss come from small pings to 1.1.1.1 and 8.8.8.8 every couple of seconds.
-- If the test server reports too many requests, the widget waits before trying again, starting at 2 minutes and doubling up to 30.
-- Each test moves a few hundred megabytes on a fast connection. Choose a longer interval on a capped plan.
+- Measurement Lab is a free public service. It allows 40 tests a day from one connection and asks apps to run far fewer, so automatic tests are limited to every 3 hours at most, and the widget counts its own tests and stops at 30 automatic or 40 in total per rolling day. Live ping, jitter, packet loss and traffic keep updating all the time.
+- If the test server reports too many requests, the widget waits before trying again, starting at 10 minutes and doubling up to 2 hours.
+- Each test moves a few hundred megabytes on a fast connection.
 - Settings, history and an error log are stored in the app's own data folder.

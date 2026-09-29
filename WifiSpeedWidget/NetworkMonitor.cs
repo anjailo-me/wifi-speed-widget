@@ -113,8 +113,18 @@ public sealed class NetworkMonitor
             };
             using var proc = Process.Start(psi);
             if (proc == null) return null;
-            var output = await proc.StandardOutput.ReadToEndAsync();
-            await proc.WaitForExitAsync();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            string output;
+            try
+            {
+                output = await proc.StandardOutput.ReadToEndAsync(timeout.Token);
+                await proc.WaitForExitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try { proc.Kill(true); } catch { }
+                return null;
+            }
 
             string? ssid = null;
             int? signal = null;

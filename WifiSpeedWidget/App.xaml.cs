@@ -9,6 +9,21 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        DispatcherUnhandledException += (_, args) =>
+        {
+            WidgetSettings.LogError(args.Exception);
+            args.Handled = true;
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception ex) WidgetSettings.LogError(ex);
+        };
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            WidgetSettings.LogError(args.Exception);
+            args.SetObserved();
+        };
+
         _instanceMutex = new Mutex(true, "WifiSpeedWidget.SingleInstance", out var isFirst);
         if (!isFirst)
         {

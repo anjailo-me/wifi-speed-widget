@@ -28,8 +28,10 @@ Requires the .NET 10 SDK and Microsoft Edge (used once to draw the icons). Run f
 
 ```
 powershell -ExecutionPolicy Bypass -File .\Packaging\make-assets.ps1
-powershell -ExecutionPolicy Bypass -File .\Packaging\build-msix.ps1 -IdentityName "<name>" -Publisher "<CN=...>" -PublisherDisplayName "<display name>" -DisplayName "<the reserved name>"
+powershell -ExecutionPolicy Bypass -File .\Packaging\build-msix.ps1 -IdentityName "<name>" -Publisher "<CN=...>" -PublisherDisplayName "<display name>" -DisplayName "<the reserved name>" -PrivacyUrl "<public address of your privacy policy>"
 ```
+
+`-PrivacyUrl` adds a "Privacy policy" item to the widget's right-click menu. The Store expects a privacy link inside the app as well as on the listing, so do not leave it out of the package you upload.
 
 The icons only need to be redrawn if you change `assets\logo.svg`; the generated ones are already in the repository. The package is written to `dist\`. For a later update, raise `-Version` (for example `1.1.1.0`). The last number must stay 0.
 
@@ -58,7 +60,7 @@ Description:
 
 > Speedline puts your connection on your desktop. A small card shows your download and upload speed, ping and jitter, and gives your Wi-Fi a live rating from Excellent to Poor.
 >
-> - Automatic speed tests every 5, 15, 30 or 60 minutes, or only when you ask
+> - Automatic speed tests every 3, 6 or 12 hours, or only when you ask
 > - Live ping, jitter and packet loss, updated every couple of seconds
 > - Wi-Fi network name, band and signal strength
 > - A history of your recent tests
@@ -80,7 +82,7 @@ Images:
 
 **Notes for certification.**
 
-> No sign-in is needed. Click "Test now" on the widget to run a speed test; it needs an internet connection and uses the open M-Lab measurement servers. The Wi-Fi name shown on the widget comes from Windows and may be blank if Location access for desktop apps is off in Windows Settings.
+> No sign-in is needed. Click "Test now" on the widget to run a speed test; it needs an internet connection and uses the open M-Lab measurement servers. If it says the test server is busy, wait a few minutes and try again: the free M-Lab service limits how many tests one connection can run. The Wi-Fi name shown on the widget comes from Windows and may be blank if Location access for desktop apps is off in Windows Settings.
 
 **Location capability.** The package declares the location capability because Windows only shares the Wi-Fi network name with apps that have location permission. If Partner Center asks why:
 
@@ -94,12 +96,28 @@ Images:
 
 Choose Submit to the Store. Review usually takes a few days. You are told by email and in Partner Center if something needs changing.
 
+## What has been tested
+
+The repository has an automated check kit in [tests](tests). It runs the real code and drives the real widget window. The last full run on the final build gave 147 passed, 0 failed and 1 skipped:
+
+- Settings: interval migration and defaults, recovery from a corrupt file, save and reload, and the counting of tests against the daily limit.
+- Network, Wi-Fi and ping monitors on a live connection.
+- Speed tests against a local stand-in for the M-Lab service: full runs, progress order, latency and rate values checked against what the server sent, cancelling mid-test, a test right after a cancel, servers that send no measurements, drop the connection after 3 or 7 seconds, answer "busy" or return no servers, and unreachable servers failing cleanly.
+- The widget window: first automatic test, status text through every stage, all four schedule choices, Test now and Stop, the busy and no-server messages, the daily limits (manual 40, automatic 30), Clear history, Keep on top, saved position, closing during a test, and a 150-second soak (managed memory flat at about 59 MB, handles and threads flat, the worst UI pause was 131 ms).
+
+The stand-in server is used because M-Lab allows only 40 tests a day per connection and had already started refusing this PC after earlier testing. The one skipped check is the run against the real M-Lab servers. Earlier builds of the speed engine were checked against the real service, but the final code was not. Run `CHECKS_LIVE=1` (see [tests/README.md](tests/README.md)) once M-Lab accepts your connection again, before you submit.
+
+The screenshots in this folder were captured from the real window. The numbers in them come from the stand-in server, so they are sample values.
+
+Not tested, because it only exists once the package is installed from the Store: the Start with Windows startup task, whether Windows shows the Wi-Fi name with the location capability, and the Windows App Certification Kit (part of the Windows SDK, can be run against the package). Also not exercised: metered-connection pausing and behavior with no network. Check those on the Store build.
+
 ## After the first release
 
 - For updates, raise the version, rebuild, and start a new submission with the new package.
-- The app has been built and its package checked with Microsoft's `makeappx`, but it could not be run on the build PC because Smart App Control blocks unsigned code there. The first real test is the Store version. If you want more assurance first, the Windows App Certification Kit in the Windows SDK can be run against the package.
 
 ## Before you charge money
 
-- M-Lab provides the speed tests free of charge as a public service. Read its usage terms at https://www.measurementlab.net/ before selling an app that depends on it, and consider contacting them.
+- M-Lab provides the speed tests free of charge as a public service, and its developer page (https://www.measurementlab.net/develop/) sets a hard limit of 40 tests per client per day. It recommends that software integrations test no more than 4 times a day, at random times. The app is built around this: the default is every 6 hours (4 a day), the fastest choice is every 3 hours, timing is randomized, and it counts its own tests and stops before the limit. Live ping, jitter and packet loss are not affected, because they do not use M-Lab.
+- An app that sells "frequent automatic speed tests" would break those rules, so the listing text above promises only what the app does. Do not add options that test more often.
+- Before charging for the app, email support@measurementlab.net to say you are distributing a paid app built on their service, and ask whether they are happy with it or would like it registered. Measurement Lab can throttle or block an app that misuses the service, and a paid app that depends on a free service should have their agreement.
 - Keep the source repository private if you sell the app. A public repository with a free build would undercut it.

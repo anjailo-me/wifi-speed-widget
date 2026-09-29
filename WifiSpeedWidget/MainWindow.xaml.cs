@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.NetworkInformation;
@@ -23,7 +24,7 @@ public partial class MainWindow : Window
     private readonly PingMonitor _pingMonitor = new();
     private readonly WidgetSettings _settings = WidgetSettings.Load();
     private readonly DispatcherTimer _clock = new() { Interval = TimeSpan.FromSeconds(1) };
-    private readonly DispatcherTimer _wifiTimer = new() { Interval = TimeSpan.FromSeconds(5) };
+    private readonly DispatcherTimer _wifiTimer = new() { Interval = TimeSpan.FromSeconds(10) };
     private readonly DispatcherTimer _pingTimer = new() { Interval = TimeSpan.FromSeconds(2) };
     private CancellationTokenSource? _testCts;
     private DateTime? _nextTestAt;
@@ -33,11 +34,13 @@ public partial class MainWindow : Window
     private int _busyStrikes;
     private bool _pausedForMeteredNetwork;
     private bool _pinging;
+    private bool _wifiBusy;
 
     public MainWindow()
     {
         InitializeComponent();
         Title = AppInfo.Name;
+        PrivacyItem.Visibility = string.IsNullOrEmpty(AppInfo.PrivacyUrl) ? Visibility.Collapsed : Visibility.Visible;
 
         Topmost = _settings.Topmost;
         var area = SystemParameters.WorkArea;
@@ -57,7 +60,7 @@ public partial class MainWindow : Window
             _wifiTimer.Start();
             _pingTimer.Start();
             DrawHistory();
-            ScheduleNextTest(TimeSpan.FromSeconds(20));
+            ScheduleNextTest(FirstTestDelay());
             await UpdateWifiAsync();
             await UpdatePingAsync();
         };
@@ -140,9 +143,14 @@ public partial class MainWindow : Window
                     _pausedForMeteredNetwork = true;
                     ScheduleNextTest(TimeSpan.FromMinutes(2));
                 }
+                else if (_monitor.Adapter == null || !NetworkInterface.GetIsNetworkAvailable())
+                {
+                    _pausedForMeteredNetwork = false;
+                    ScheduleNextTest(TimeSpan.FromSeconds(30));
+                }
                 else
                 {
-                    await RunTestAsync();
+                    await RunTestAsync(false);
                     return;
                 }
             }
@@ -203,7 +211,7 @@ public partial class MainWindow : Window
         ScheduleText.Text = _settings.AutoTestMinutes switch
         {
             0 => "Auto-test off",
-            60 => "Every hour",
+            var m when m % 60 == 0 => $"Every {m / 60} hours",
             var m => $"Every {m} min"
         };
     }
@@ -222,12 +230,29 @@ public partial class MainWindow : Window
             _testCts.Cancel();
             return;
         }
-        await RunTestAsync();
+        await RunTestAsync(true);
     }
 
-    private async Task RunTestAsync()
+    private async Task RunTestAsync(bool manual)
     {
         if (_testCts != null) return;
+        var limit = manual ? WidgetSettings.DailyTestLimit : WidgetSettings.AutoDailyLimit;
+        if (_settings.TestsInLastDay() >= limit)
+        {
+            if (manual)
+            {
+                _failureText = "Daily test limit reached, try again later";
+                StatusLine.ToolTip = "Measurement Lab allows 40 speed tests a day from one connection.";
+                UpdateStatusLine();
+            }
+            else
+            {
+                ScheduleNextTest(TimeSpan.FromMinutes(30));
+            }
+            return;
+        }
+        _settings.RecordTestStart();
+        _settings.Save();
         _nextTestAt = null;
         _pausedForMeteredNetwork = false;
         _testCts = new CancellationTokenSource();
@@ -332,13 +357,30 @@ public partial class MainWindow : Window
             UpdateNextText();
             return;
         }
-        var delay = failed ? TimeSpan.FromSeconds(60) : TimeSpan.FromMinutes(minutes);
+        var delay = failed ? TimeSpan.FromMinutes(5) : Jitter(TimeSpan.FromMinutes(minutes));
         if (_busyStrikes > 0)
         {
-            var backoff = TimeSpan.FromMinutes(Math.Min(30, Math.Pow(2, _busyStrikes)));
+            var backoff = TimeSpan.FromMinutes(Math.Min(120, 5 * Math.Pow(2, _busyStrikes)));
             if (backoff > delay) delay = backoff;
         }
         ScheduleNextTest(delay);
+    }
+
+    private static TimeSpan Jitter(TimeSpan span) =>
+        TimeSpan.FromTicks((long)(span.Ticks * (0.75 + Random.Shared.NextDouble() * 0.5)));
+
+    private TimeSpan FirstTestDelay()
+    {
+        var delay = TimeSpan.FromSeconds(20 + Random.Shared.Next(0, 40));
+        var minutes = _settings.AutoTestMinutes;
+        if (minutes > 0 && _settings.LastRun is { } last)
+        {
+            var interval = TimeSpan.FromMinutes(minutes);
+            var remaining = last.ToUniversalTime() + interval - DateTime.UtcNow;
+            if (remaining > interval) remaining = interval;
+            if (remaining > delay) delay = remaining;
+        }
+        return delay;
     }
 
     private void ScheduleNextTest(TimeSpan delay)
@@ -361,7 +403,7 @@ public partial class MainWindow : Window
         UpdateScheduleText();
         _pausedForMeteredNetwork = false;
         if (_testCts != null) return;
-        ScheduleNextTest(TimeSpan.FromMinutes(_settings.AutoTestMinutes));
+        ScheduleNextTest(Jitter(TimeSpan.FromMinutes(_settings.AutoTestMinutes)));
     }
 
     private async Task UpdatePingAsync()
@@ -425,6 +467,20 @@ public partial class MainWindow : Window
     }
 
     private async Task UpdateWifiAsync()
+    {
+        if (_wifiBusy) return;
+        _wifiBusy = true;
+        try
+        {
+            await UpdateWifiCoreAsync();
+        }
+        finally
+        {
+            _wifiBusy = false;
+        }
+    }
+
+    private async Task UpdateWifiCoreAsync()
     {
         var adapter = _monitor.Adapter;
         var isWireless = adapter?.NetworkInterfaceType == NetworkInterfaceType.Wireless80211;
@@ -572,6 +628,26 @@ public partial class MainWindow : Window
         _settings.History.Clear();
         _settings.Save();
         DrawHistory();
+    }
+
+    private void OnAbout(object sender, RoutedEventArgs e)
+    {
+        var version = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "";
+        MessageBox.Show(this,
+            $"{AppInfo.Name} {version}\n\nSpeed tests use the open Measurement Lab network. Measurement Lab publishes test results, including your IP address, as open data. It allows 40 tests a day from one connection, so automatic tests run every few hours.\n\nConnection quality checks send small pings to 1.1.1.1 and 8.8.8.8.",
+            "About " + AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void OnPrivacy(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(AppInfo.PrivacyUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            WidgetSettings.LogError(ex);
+        }
     }
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();
