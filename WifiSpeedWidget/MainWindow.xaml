@@ -1,7 +1,7 @@
 <Window x:Class="WifiSpeedWidget.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Wi-Fi Speed" Width="340" SizeToContent="Height"
+        Title="Speedline" Width="340" SizeToContent="Height"
         WindowStyle="SingleBorderWindow" ResizeMode="NoResize"
         ShowInTaskbar="False" Topmost="True"
         Background="{DynamicResource Surface}"
@@ -144,8 +144,6 @@
                     <Button x:Name="ScheduleButton" Style="{StaticResource LinkButton}" Click="OnScheduleClick" ToolTip="How often to test automatically">
                         <Button.ContextMenu>
                             <ContextMenu x:Name="ScheduleMenu" Placement="Top">
-                                <MenuItem Header="Continuous" Tag="-1" IsCheckable="True" Click="OnAutoInterval"/>
-                                <MenuItem Header="Every minute" Tag="1" IsCheckable="True" Click="OnAutoInterval"/>
                                 <MenuItem Header="Every 5 minutes" Tag="5" IsCheckable="True" Click="OnAutoInterval"/>
                                 <MenuItem Header="Every 15 minutes" Tag="15" IsCheckable="True" Click="OnAutoInterval"/>
                                 <MenuItem Header="Every 30 minutes" Tag="30" IsCheckable="True" Click="OnAutoInterval"/>
@@ -154,7 +152,7 @@
                                 <MenuItem Header="Off" Tag="0" IsCheckable="True" Click="OnAutoInterval"/>
                             </ContextMenu>
                         </Button.ContextMenu>
-                        <TextBlock><Run x:Name="ScheduleText" Text="Continuous"/><Run Text="  "/><Run Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="8"/></TextBlock>
+                        <TextBlock><Run x:Name="ScheduleText" Text="Every 15 min"/><Run Text="  "/><Run Text="&#xE70D;" FontFamily="{StaticResource IconFont}" FontSize="8"/></TextBlock>
                     </Button>
                     <TextBlock x:Name="NextText" Text="" FontSize="12" Foreground="{DynamicResource TextTertiary}" VerticalAlignment="Center" Typography.NumeralAlignment="Tabular"/>
                 </StackPanel>

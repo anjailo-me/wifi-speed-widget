@@ -2,10 +2,12 @@ using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Net.WebSockets;
+using System.Text.Json;
 
 namespace WifiSpeedWidget;
 
-public enum TestPhase { Ping, Download, Upload }
+public enum TestPhase { Locate, Download, Upload }
 
 public record TestProgress(TestPhase Phase, double Value, double Fraction);
 
@@ -13,189 +15,333 @@ public record TestResult(double PingMs, double DownloadMbps, double UploadMbps);
 
 public sealed class SpeedTester
 {
-    private const string DownUrl = "https://speed.cloudflare.com/__down?bytes=";
-    private const string UpUrl = "https://speed.cloudflare.com/__up";
-    private static readonly TimeSpan PhaseDuration = TimeSpan.FromSeconds(8);
-    private static readonly TimeSpan Warmup = TimeSpan.FromSeconds(1.5);
-    private const int Streams = 4;
+    private const string Subprotocol = "net.measurementlab.ndt.v7";
+    private const string ClientName = "speedline-widget";
+    private static readonly TimeSpan TestLength = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan HardLimit = TimeSpan.FromSeconds(16);
+    private static readonly TimeSpan ConnectLimit = TimeSpan.FromSeconds(10);
+    private static readonly string ClientVersion =
+        typeof(SpeedTester).Assembly.GetName().Version?.ToString(3) ?? "1.0.0";
 
-    private static readonly HttpClient Http = new(new SocketsHttpHandler
+    private static readonly HttpClient Http = CreateHttpClient();
+
+    private sealed record Target(Uri Download, Uri Upload);
+
+    private sealed class ServerCounters
     {
-        PooledConnectionLifetime = TimeSpan.FromMinutes(2),
-        MaxConnectionsPerServer = 16,
-        AutomaticDecompression = DecompressionMethods.None
-    })
+        private readonly object _gate = new();
+        private long _bytes;
+        private double _seconds;
+
+        public void Update(long bytes, double seconds)
+        {
+            if (bytes <= 0 || seconds <= 0) return;
+            lock (_gate)
+            {
+                _bytes = bytes;
+                _seconds = seconds;
+            }
+        }
+
+        public bool TryGetMbps(out double mbps)
+        {
+            lock (_gate)
+            {
+                mbps = _seconds > 0 ? _bytes * 8 / _seconds / 1_000_000 : 0;
+                return _seconds > 0;
+            }
+        }
+    }
+
+    private static HttpClient CreateHttpClient()
     {
-        Timeout = Timeout.InfiniteTimeSpan
-    };
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd($"SpeedlineWidget/{ClientVersion}");
+        return client;
+    }
 
     public async Task<TestResult> RunAsync(IProgress<TestProgress> progress, CancellationToken ct)
     {
-        var ping = await MeasurePingAsync(progress, ct);
-        var down = await MeasureThroughputAsync(TestPhase.Download, DownloadWorker, progress, ct);
-        var up = await MeasureThroughputAsync(TestPhase.Upload, UploadWorker, progress, ct);
-        return new TestResult(ping, down, up);
-    }
+        progress.Report(new TestProgress(TestPhase.Locate, 0, 0));
+        var targets = await LocateAsync(ct);
+        progress.Report(new TestProgress(TestPhase.Locate, 0, 1));
 
-    private static async Task<double> MeasurePingAsync(IProgress<TestProgress> progress, CancellationToken ct)
-    {
-        const int rounds = 6;
-        var samples = new List<double>();
         Exception? lastError = null;
-        for (var i = 0; i < rounds; i++)
+        foreach (var target in targets)
         {
             try
             {
-                var sw = Stopwatch.StartNew();
-                using (var resp = await Http.GetAsync(DownUrl + "0", HttpCompletionOption.ResponseHeadersRead, ct))
-                {
-                    resp.EnsureSuccessStatusCode();
-                }
-                sw.Stop();
-                if (i > 0) samples.Add(sw.Elapsed.TotalMilliseconds);
+                var (downMbps, minRttMs) = await DownloadAsync(target.Download, progress, ct);
+                var upMbps = await UploadAsync(target.Upload, progress, ct);
+                return new TestResult(minRttMs, downMbps, upMbps);
             }
-            catch (Exception ex) when (ex is HttpRequestException or IOException && !ct.IsCancellationRequested)
+            catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or WebSocketException or IOException or TimeoutException
+                                           && !ct.IsCancellationRequested)
             {
                 lastError = ex;
             }
-            var current = samples.Count > 0 ? samples.Min() : 0;
-            progress.Report(new TestProgress(TestPhase.Ping, current, (i + 1.0) / rounds));
         }
-        if (samples.Count == 0) throw lastError ?? new HttpRequestException("No latency samples");
-        return samples.Min();
+        throw lastError ?? new HttpRequestException("No test server was available");
     }
 
-    private static async Task<double> MeasureThroughputAsync(
-        TestPhase phase,
-        Func<Counter, CancellationToken, Task> worker,
-        IProgress<TestProgress> progress,
-        CancellationToken ct)
+    private static async Task<List<Target>> LocateAsync(CancellationToken ct)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(PhaseDuration);
-        var counter = new Counter();
-        var sw = Stopwatch.StartNew();
-        var workers = Enumerable.Range(0, Streams).Select(_ => Task.Run(() => worker(counter, cts.Token))).ToArray();
-        var all = Task.WhenAll(workers);
+        var url = $"https://locate.measurementlab.net/v2/nearest/ndt/ndt7?client_name={ClientName}&client_version={ClientVersion}";
+        string body;
+        try
+        {
+            using var response = await Http.GetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+            body = await response.Content.ReadAsStringAsync(ct);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException("Timed out finding a test server");
+        }
+        using var doc = JsonDocument.Parse(body);
 
-        long warmBytes = -1;
-        double warmTime = 0;
+        var targets = new List<Target>();
+        if (doc.RootElement.TryGetProperty("results", out var results))
+        {
+            foreach (var result in results.EnumerateArray())
+            {
+                if (!result.TryGetProperty("urls", out var urls)) continue;
+                var down = ReadUrl(urls, "wss:///ndt/v7/download");
+                var up = ReadUrl(urls, "wss:///ndt/v7/upload");
+                if (down != null && up != null) targets.Add(new Target(down, up));
+            }
+        }
+        if (targets.Count == 0) throw new HttpRequestException("No test server was available");
+        return targets;
+    }
+
+    private static Uri? ReadUrl(JsonElement urls, string key) =>
+        urls.TryGetProperty(key, out var value) && value.GetString() is { } s ? new Uri(s) : null;
+
+    private static async Task<ClientWebSocket> ConnectAsync(Uri url, CancellationToken ct)
+    {
+        var ws = new ClientWebSocket();
+        ws.Options.AddSubProtocol(Subprotocol);
+        ws.Options.SetBuffer(256 * 1024, 64 * 1024);
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(ConnectLimit);
+        try
+        {
+            await ws.ConnectAsync(url, limit.Token);
+            return ws;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            ws.Dispose();
+            throw new TimeoutException("Timed out connecting to the test server");
+        }
+        catch (WebSocketException ex)
+        {
+            var status = ws.HttpStatusCode;
+            ws.Dispose();
+            if (status == HttpStatusCode.TooManyRequests)
+                throw new HttpRequestException("The test server is busy", ex, HttpStatusCode.TooManyRequests);
+            throw;
+        }
+    }
+
+    private static async Task<(double Mbps, double MinRttMs)> DownloadAsync(
+        Uri url, IProgress<TestProgress> progress, CancellationToken ct)
+    {
+        using var ws = await ConnectAsync(url, ct);
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(HardLimit);
+
+        var buffer = new byte[256 * 1024];
+        var text = new MemoryStream();
+        long total = 0;
+        double minRttMs = 0;
+        double smoothed = 0, lastReport = 0, lastTime = 0;
         long lastBytes = 0;
-        double lastTime = 0;
-        double smoothed = 0;
+        var clock = Stopwatch.StartNew();
 
-        while (!all.IsCompleted)
-        {
-            await Task.WhenAny(all, Task.Delay(200, CancellationToken.None));
-            var t = sw.Elapsed.TotalSeconds;
-            var bytes = counter.Value;
-            if (warmBytes < 0 && sw.Elapsed >= Warmup)
-            {
-                warmBytes = bytes;
-                warmTime = t;
-            }
-            var dt = t - lastTime;
-            if (dt > 0)
-            {
-                var instant = (bytes - lastBytes) * 8 / dt / 1_000_000;
-                smoothed = smoothed == 0 ? instant : smoothed * 0.7 + instant * 0.3;
-            }
-            lastBytes = bytes;
-            lastTime = t;
-            progress.Report(new TestProgress(phase, smoothed, Math.Min(1, t / PhaseDuration.TotalSeconds)));
-        }
-
-        try { await all; } catch (OperationCanceledException) { }
-        ct.ThrowIfCancellationRequested();
-
-        var total = sw.Elapsed.TotalSeconds;
-        var finalBytes = counter.Value;
-        if (warmBytes < 0 || total - warmTime < 0.5)
-            return finalBytes * 8 / Math.Max(total, 0.001) / 1_000_000;
-        return (finalBytes - warmBytes) * 8 / (total - warmTime) / 1_000_000;
-    }
-
-    private static async Task DownloadWorker(Counter counter, CancellationToken ct)
-    {
-        var buffer = new byte[128 * 1024];
         try
         {
-            while (!ct.IsCancellationRequested)
+            while (ws.State == WebSocketState.Open)
             {
-                using var resp = await Http.GetAsync(DownUrl + "50000000", HttpCompletionOption.ResponseHeadersRead, ct);
-                resp.EnsureSuccessStatusCode();
-                await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-                int read;
-                while ((read = await stream.ReadAsync(buffer, ct)) > 0)
-                    counter.Add(read);
+                var message = await ws.ReceiveAsync(buffer, limit.Token);
+                if (message.MessageType == WebSocketMessageType.Close) break;
+                total += message.Count;
+
+                if (message.MessageType == WebSocketMessageType.Text)
+                {
+                    text.Write(buffer, 0, message.Count);
+                    if (message.EndOfMessage)
+                    {
+                        minRttMs = ReadMinRtt(text.ToArray(), minRttMs);
+                        text.SetLength(0);
+                    }
+                }
+
+                var now = clock.Elapsed.TotalSeconds;
+                if (now - lastReport < 0.25) continue;
+                var instant = (total - lastBytes) * 8 / (now - lastTime) / 1_000_000;
+                smoothed = smoothed == 0 ? instant : smoothed * 0.6 + instant * 0.4;
+                lastBytes = total;
+                lastTime = now;
+                lastReport = now;
+                progress.Report(new TestProgress(TestPhase.Download, smoothed, Math.Min(1, now / TestLength.TotalSeconds)));
             }
         }
-        catch (OperationCanceledException) { }
-        catch (IOException) when (ct.IsCancellationRequested) { }
-        catch (HttpRequestException) when (ct.IsCancellationRequested) { }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            if (clock.Elapsed.TotalSeconds < 6) throw new TimeoutException("The download test timed out");
+        }
+        catch (WebSocketException) when (clock.Elapsed.TotalSeconds > 6)
+        {
+        }
+
+        var elapsed = Math.Max(clock.Elapsed.TotalSeconds, 0.001);
+        await CloseQuietlyAsync(ws);
+        if (total == 0) throw new HttpRequestException("The test server did not send any data");
+        return (total * 8 / elapsed / 1_000_000, minRttMs);
     }
 
-    private static async Task UploadWorker(Counter counter, CancellationToken ct)
+    private static async Task<double> UploadAsync(Uri url, IProgress<TestProgress> progress, CancellationToken ct)
+    {
+        using var ws = await ConnectAsync(url, ct);
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(HardLimit);
+
+        var counters = new ServerCounters();
+        var receiver = Task.Run(() => ReceiveMeasurementsAsync(ws, counters, limit.Token));
+
+        var payload = new byte[1 << 20];
+        Random.Shared.NextBytes(payload);
+        var size = 1 << 13;
+        long sent = 0, lastSent = 0;
+        double smoothed = 0, lastReport = 0, lastTime = 0;
+        var clock = Stopwatch.StartNew();
+
+        try
+        {
+            while (clock.Elapsed < TestLength && ws.State == WebSocketState.Open)
+            {
+                await ws.SendAsync(new ArraySegment<byte>(payload, 0, size), WebSocketMessageType.Binary, true, limit.Token);
+                sent += size;
+                if (size < payload.Length && size < sent / 16) size = Math.Min(payload.Length, size * 2);
+
+                var now = clock.Elapsed.TotalSeconds;
+                if (now - lastReport < 0.25) continue;
+                double shown;
+                if (counters.TryGetMbps(out var serverMbps))
+                {
+                    shown = serverMbps;
+                }
+                else
+                {
+                    var instant = (sent - lastSent) * 8 / (now - lastTime) / 1_000_000;
+                    smoothed = smoothed == 0 ? instant : smoothed * 0.6 + instant * 0.4;
+                    shown = smoothed;
+                }
+                lastSent = sent;
+                lastTime = now;
+                lastReport = now;
+                progress.Report(new TestProgress(TestPhase.Upload, shown, Math.Min(1, now / TestLength.TotalSeconds)));
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            if (clock.Elapsed.TotalSeconds < 6) throw new TimeoutException("The upload test timed out");
+        }
+        catch (WebSocketException) when (clock.Elapsed.TotalSeconds > 6)
+        {
+        }
+
+        var elapsed = Math.Max(clock.Elapsed.TotalSeconds, 0.001);
+        await CloseQuietlyAsync(ws);
+        await Task.WhenAny(receiver, Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None));
+
+        if (counters.TryGetMbps(out var finalMbps)) return finalMbps;
+        if (sent == 0) throw new HttpRequestException("The test server did not accept any data");
+        return sent * 8 / elapsed / 1_000_000;
+    }
+
+    private static async Task ReceiveMeasurementsAsync(ClientWebSocket ws, ServerCounters counters, CancellationToken ct)
+    {
+        var buffer = new byte[64 * 1024];
+        var text = new MemoryStream();
+        try
+        {
+            while (ws.State is WebSocketState.Open or WebSocketState.CloseSent)
+            {
+                var message = await ws.ReceiveAsync(buffer, ct);
+                if (message.MessageType == WebSocketMessageType.Close) break;
+                if (message.MessageType != WebSocketMessageType.Text) continue;
+                text.Write(buffer, 0, message.Count);
+                if (!message.EndOfMessage) continue;
+                ReadServerCounters(text.ToArray(), counters);
+                text.SetLength(0);
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or WebSocketException or ObjectDisposedException)
+        {
+        }
+    }
+
+    private static double ReadMinRtt(byte[] json, double current)
     {
         try
         {
-            while (!ct.IsCancellationRequested)
-            {
-                using var content = new CountingContent(32 * 1024 * 1024, counter);
-                using var resp = await Http.PostAsync(UpUrl, content, ct);
-            }
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("TCPInfo", out var tcp)
+                && tcp.TryGetProperty("MinRTT", out var value)
+                && value.TryGetDouble(out var micros)
+                && micros > 0)
+                return micros / 1000.0;
         }
-        catch (OperationCanceledException) { }
-        catch (IOException) when (ct.IsCancellationRequested) { }
-        catch (HttpRequestException) when (ct.IsCancellationRequested) { }
+        catch (JsonException)
+        {
+        }
+        return current;
     }
 
-    public sealed class Counter
+    private static void ReadServerCounters(byte[] json, ServerCounters counters)
     {
-        private long _value;
-        public long Value => Interlocked.Read(ref _value);
-        public void Add(long n) => Interlocked.Add(ref _value, n);
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (TryRead(root, "TCPInfo", "BytesReceived", "ElapsedTime", out var bytes, out var micros)
+                || TryRead(root, "AppInfo", "NumBytes", "ElapsedTime", out bytes, out micros))
+                counters.Update(bytes, micros / 1_000_000.0);
+        }
+        catch (JsonException)
+        {
+        }
     }
 
-    private sealed class CountingContent : HttpContent
+    private static bool TryRead(JsonElement root, string section, string bytesKey, string timeKey, out long bytes, out double micros)
     {
-        private static readonly byte[] Chunk = CreateChunk();
-        private readonly long _length;
-        private readonly Counter _counter;
+        bytes = 0;
+        micros = 0;
+        return root.TryGetProperty(section, out var info)
+               && info.TryGetProperty(bytesKey, out var b) && b.TryGetInt64(out bytes)
+               && info.TryGetProperty(timeKey, out var t) && t.TryGetDouble(out micros);
+    }
 
-        public CountingContent(long length, Counter counter)
+    private static async Task CloseQuietlyAsync(ClientWebSocket ws)
+    {
+        try
         {
-            _length = length;
-            _counter = counter;
-            Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
-        }
-
-        private static byte[] CreateChunk()
-        {
-            var data = new byte[64 * 1024];
-            Random.Shared.NextBytes(data);
-            return data;
-        }
-
-        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
-            SerializeToStreamAsync(stream, context, CancellationToken.None);
-
-        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken ct)
-        {
-            long sent = 0;
-            while (sent < _length)
+            if (ws.State is WebSocketState.Open or WebSocketState.CloseReceived)
             {
-                var n = (int)Math.Min(Chunk.Length, _length - sent);
-                await stream.WriteAsync(Chunk.AsMemory(0, n), ct);
-                sent += n;
-                _counter.Add(n);
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                await ws.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", timeout.Token);
             }
         }
-
-        protected override bool TryComputeLength(out long length)
+        catch (Exception ex) when (ex is OperationCanceledException or WebSocketException or ObjectDisposedException)
         {
-            length = _length;
-            return true;
+            ws.Abort();
         }
     }
 }

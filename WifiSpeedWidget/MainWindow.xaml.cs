@@ -31,11 +31,13 @@ public partial class MainWindow : Window
     private string? _wifiDetail;
     private string? _failureText;
     private int _busyStrikes;
+    private bool _pausedForMeteredNetwork;
     private bool _pinging;
 
     public MainWindow()
     {
         InitializeComponent();
+        Title = AppInfo.Name;
 
         Topmost = _settings.Topmost;
         var area = SystemParameters.WorkArea;
@@ -55,7 +57,7 @@ public partial class MainWindow : Window
             _wifiTimer.Start();
             _pingTimer.Start();
             DrawHistory();
-            ScheduleNextTest(TimeSpan.FromSeconds(3));
+            ScheduleNextTest(TimeSpan.FromSeconds(20));
             await UpdateWifiAsync();
             await UpdatePingAsync();
         };
@@ -70,7 +72,7 @@ public partial class MainWindow : Window
         MainMenu.Opened += (_, _) =>
         {
             TopmostItem.IsChecked = Topmost;
-            StartupItem.IsChecked = SafeStartupState();
+            _ = RefreshStartupItemAsync();
             TestMenuItem.Header = _testCts != null ? "Stop test" : "Test now";
         };
         MainMenu.Closed += (_, _) =>
@@ -133,8 +135,16 @@ public partial class MainWindow : Window
             UpdateStatusLine();
             if (_nextTestAt is { } due && DateTime.Now >= due)
             {
-                await RunTestAsync();
-                return;
+                if (Platform.IsMeteredConnection())
+                {
+                    _pausedForMeteredNetwork = true;
+                    ScheduleNextTest(TimeSpan.FromMinutes(2));
+                }
+                else
+                {
+                    await RunTestAsync();
+                    return;
+                }
             }
         }
         UpdateNextText();
@@ -178,6 +188,11 @@ public partial class MainWindow : Window
             NextText.Text = "";
             return;
         }
+        if (_pausedForMeteredNetwork)
+        {
+            NextText.Text = "  ·  paused on a metered network";
+            return;
+        }
         var left = due - DateTime.Now;
         if (left < TimeSpan.Zero) left = TimeSpan.Zero;
         NextText.Text = left.TotalHours >= 1 ? $"  ·  next in {left:h\\:mm\\:ss}" : $"  ·  next in {left:m\\:ss}";
@@ -187,9 +202,7 @@ public partial class MainWindow : Window
     {
         ScheduleText.Text = _settings.AutoTestMinutes switch
         {
-            < 0 => "Continuous",
             0 => "Auto-test off",
-            1 => "Every minute",
             60 => "Every hour",
             var m => $"Every {m} min"
         };
@@ -216,10 +229,10 @@ public partial class MainWindow : Window
     {
         if (_testCts != null) return;
         _nextTestAt = null;
+        _pausedForMeteredNetwork = false;
         _testCts = new CancellationTokenSource();
         SetTesting(true);
 
-        var cancelled = false;
         var failed = false;
         try
         {
@@ -238,7 +251,6 @@ public partial class MainWindow : Window
         }
         catch (OperationCanceledException)
         {
-            cancelled = true;
         }
         catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.TooManyRequests)
         {
@@ -261,7 +273,7 @@ public partial class MainWindow : Window
             _testCts = null;
             SetTesting(false);
             ShowLastResult();
-            ScheduleAfterTest(failed, cancelled);
+            ScheduleAfterTest(failed);
         }
     }
 
@@ -282,9 +294,9 @@ public partial class MainWindow : Window
         if (_testCts == null) return;
         switch (p.Phase)
         {
-            case TestPhase.Ping:
-                StatusLine.Text = "Measuring latency…";
-                SetProgress(p.Fraction * 0.1);
+            case TestPhase.Locate:
+                StatusLine.Text = "Finding a nearby test server…";
+                SetProgress(p.Fraction * 0.05);
                 break;
             case TestPhase.Download:
                 StatusLine.Text = "Measuring download…";
@@ -293,7 +305,7 @@ public partial class MainWindow : Window
                     HeroValue.Text = FormatMbps(p.Value);
                     HeroValue.SetResourceReference(TextElement.ForegroundProperty, "Accent");
                 }
-                SetProgress(0.1 + p.Fraction * 0.45);
+                SetProgress(0.05 + p.Fraction * 0.475);
                 break;
             case TestPhase.Upload:
                 StatusLine.Text = "Measuring upload…";
@@ -303,7 +315,7 @@ public partial class MainWindow : Window
                     UploadValue.Text = FormatMbps(p.Value);
                     UploadValue.SetResourceReference(TextElement.ForegroundProperty, "Accent");
                 }
-                SetProgress(0.55 + p.Fraction * 0.45);
+                SetProgress(0.525 + p.Fraction * 0.475);
                 break;
         }
     }
@@ -311,7 +323,7 @@ public partial class MainWindow : Window
     private void SetProgress(double fraction) =>
         ProgressFill.Width = Math.Max(0, ProgressTrack.ActualWidth * Math.Clamp(fraction, 0, 1));
 
-    private void ScheduleAfterTest(bool failed, bool cancelled)
+    private void ScheduleAfterTest(bool failed)
     {
         var minutes = _settings.AutoTestMinutes;
         if (minutes == 0)
@@ -320,13 +332,7 @@ public partial class MainWindow : Window
             UpdateNextText();
             return;
         }
-        TimeSpan delay;
-        if (minutes < 0)
-            delay = TimeSpan.FromSeconds(cancelled ? 60 : failed ? 30 : 5);
-        else if (failed)
-            delay = TimeSpan.FromSeconds(Math.Min(60, minutes * 60));
-        else
-            delay = TimeSpan.FromMinutes(minutes);
+        var delay = failed ? TimeSpan.FromSeconds(60) : TimeSpan.FromMinutes(minutes);
         if (_busyStrikes > 0)
         {
             var backoff = TimeSpan.FromMinutes(Math.Min(30, Math.Pow(2, _busyStrikes)));
@@ -353,9 +359,9 @@ public partial class MainWindow : Window
         _settings.AutoTestMinutes = int.Parse(tag);
         _settings.Save();
         UpdateScheduleText();
+        _pausedForMeteredNetwork = false;
         if (_testCts != null) return;
-        var minutes = _settings.AutoTestMinutes;
-        ScheduleNextTest(minutes < 0 ? TimeSpan.FromSeconds(2) : TimeSpan.FromMinutes(Math.Max(minutes, 0)));
+        ScheduleNextTest(TimeSpan.FromMinutes(_settings.AutoTestMinutes));
     }
 
     private async Task UpdatePingAsync()
@@ -502,7 +508,7 @@ public partial class MainWindow : Window
             var x = w - (items.Count - i) * slot;
 
             var hit = new Rectangle { Width = slot, Height = h + 4, Fill = Brushes.Transparent, RadiusX = 3, RadiusY = 3 };
-            hit.ToolTip = $"{r.Time.ToLocalTime():ddd HH:mm}\nDownload  {FormatMbps(r.DownloadMbps)} Mbps\nUpload  {FormatMbps(r.UploadMbps)} Mbps\nLatency  {r.PingMs:F0} ms";
+            hit.ToolTip = $"{r.Time.ToLocalTime():ddd HH:mm}\nDownload  {FormatMbps(r.DownloadMbps)} Mbps\nUpload  {FormatMbps(r.UploadMbps)} Mbps\nLatency  {(r.PingMs > 0 ? $"{r.PingMs:F0} ms" : "—")}";
             ToolTipService.SetInitialShowDelay(hit, 150);
             hit.MouseEnter += (_, _) => hit.SetResourceReference(Shape.FillProperty, "SubtleHover");
             hit.MouseLeave += (_, _) => hit.Fill = Brushes.Transparent;
@@ -548,21 +554,17 @@ public partial class MainWindow : Window
         _settings.Save();
     }
 
-    private void OnToggleStartup(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            WidgetSettings.StartsWithWindows = StartupItem.IsChecked;
-        }
-        catch
-        {
-            StartupItem.IsChecked = SafeStartupState();
-        }
-    }
+    private async Task RefreshStartupItemAsync() =>
+        StartupItem.IsChecked = await Platform.GetStartupEnabledAsync();
 
-    private static bool SafeStartupState()
+    private async void OnToggleStartup(object sender, RoutedEventArgs e)
     {
-        try { return WidgetSettings.StartsWithWindows; } catch { return false; }
+        var result = await Platform.SetStartupAsync(StartupItem.IsChecked);
+        StartupItem.IsChecked = result == StartupResult.Enabled;
+        if (result == StartupResult.BlockedBySettings)
+            MessageBox.Show(this,
+                "Starting with Windows is turned off for this app in Windows Settings. Open Settings > Apps > Startup to turn it on.",
+                AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void OnClearHistory(object sender, RoutedEventArgs e)

@@ -21,15 +21,24 @@ public sealed class WidgetSettings
     public double? LastDown { get; set; }
     public double? LastUp { get; set; }
     public DateTime? LastRun { get; set; }
-    public int AutoTestMinutes { get; set; } = -1;
+    public int AutoTestMinutes { get; set; } = 15;
     public List<TestRecord> History { get; set; } = new();
+
+    private static readonly int[] AllowedIntervals = { 0, 5, 15, 30, 60 };
+
+    private static int NormalizeInterval(int minutes) =>
+        Array.IndexOf(AllowedIntervals, minutes) >= 0 ? minutes : minutes is < 0 or 1 ? 5 : 15;
 
     public static WidgetSettings Load()
     {
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<WidgetSettings>(File.ReadAllText(FilePath)) ?? new WidgetSettings();
+            {
+                var loaded = JsonSerializer.Deserialize<WidgetSettings>(File.ReadAllText(FilePath)) ?? new WidgetSettings();
+                loaded.AutoTestMinutes = NormalizeInterval(loaded.AutoTestMinutes);
+                return loaded;
+            }
         }
         catch (Exception ex)
         {

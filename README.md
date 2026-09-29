@@ -1,17 +1,12 @@
 <p align="center">
-  <img src="docs/images/logo.png" width="96" alt="Wi-Fi Speed Widget logo">
+  <img src="docs/images/logo.png" width="96" alt="Speedline logo">
 </p>
 
-<h1 align="center">Wi-Fi Speed Widget</h1>
+<h1 align="center">Speedline</h1>
 
-<p align="center">A small, draggable Windows desktop widget that keeps testing your connection.</p>
+<p align="center">A small, draggable Windows desktop widget that tests your internet speed and watches your connection.</p>
 
-<p align="center">
-  <a href="https://github.com/anjailo-me/wifi-speed-widget/releases/latest">Download the latest .exe</a>
-  · no install, no .NET required, just run it
-</p>
-
-![Wi-Fi Speed Widget](docs/images/00-cover.png)
+![Speedline](docs/images/00-cover.png)
 
 ## Guide
 
@@ -23,27 +18,30 @@
 
 ![A speed test in progress](docs/images/02-testing.png)
 
-### 3. Choose how often it tests
+### 3. Right-click for options
 
-![The test schedule menu](docs/images/03-schedule.png)
+![The options menu](docs/images/03-options.png)
 
-### 4. Right-click for options
+### 4. Put it anywhere
 
-![The options menu](docs/images/04-options.png)
-
-### 5. Put it anywhere
-
-![Dragging the widget to a new spot](docs/images/05-move.png)
+![Dragging the widget to a new spot](docs/images/04-move.png)
 
 ## Features
 
-- Automatic speed tests: continuous, or every 1, 5, 15, 30 or 60 minutes
+- Automatic speed tests every 5, 15, 30 or 60 minutes, or only on demand
 - Live ping, jitter and packet loss with a connection rating
 - Wi-Fi network name, band and signal strength
 - History of recent test results
+- Automatic tests pause on metered connections
 - Follows the Windows light/dark theme and accent color
 - Remembers its position, even across monitors with different scaling
 - Optional always-on-top and start with Windows
+
+## Install
+
+Speedline is meant to be installed from the Microsoft Store. See [STORE.md](STORE.md) for how it is packaged and published.
+
+Windows Smart App Control blocks any program that is not digitally signed, and gives no "Run anyway" option. A plain build of this project, or the unsigned `.exe` attached to the v1.0.0 release, is therefore blocked on PCs where Smart App Control is on. The Store package is signed by Microsoft.
 
 ## Build
 
@@ -53,16 +51,18 @@ Requires the .NET 10 SDK. Open `WifiSpeedWidget.slnx` in Visual Studio and press
 dotnet run --project WifiSpeedWidget
 ```
 
-To build your own one-click .exe instead of using a [release](https://github.com/anjailo-me/wifi-speed-widget/releases/latest):
+To build a folder you can run anywhere without installing .NET:
 
 ```
-dotnet publish WifiSpeedWidget -c Release -r win-x64 --self-contained true
+dotnet publish WifiSpeedWidget -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
-This produces a single `WifiSpeedWidget.exe` under `WifiSpeedWidget\bin\Release\net10.0-windows\win-x64\publish\`. It runs on its own, no .NET install needed on the target PC. Copy it anywhere and double-click it, or create a shortcut to it.
+To build the package for the Store, see [STORE.md](STORE.md).
 
-## Notes
+## How it works
 
-- Speed tests use Cloudflare's speed test endpoints. If the server reports too many requests, the widget waits before testing again, starting at 2 minutes and doubling up to 30.
-- On a fast connection each test transfers a few hundred megabytes. On a capped data plan, choose a longer interval.
-- Settings, history and an error log are stored in `%AppData%\WifiSpeedWidget`.
+- Speed tests use [Measurement Lab](https://www.measurementlab.net/) (M-Lab) and its open ndt7 protocol. M-Lab publishes the results of tests as open data, including the IP address used. See [PRIVACY.md](PRIVACY.md).
+- Ping, jitter and packet loss come from small pings to 1.1.1.1 and 8.8.8.8 every couple of seconds.
+- If the test server reports too many requests, the widget waits before trying again, starting at 2 minutes and doubling up to 30.
+- Each test moves a few hundred megabytes on a fast connection. Choose a longer interval on a capped plan.
+- Settings, history and an error log are stored in the app's own data folder.
