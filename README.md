@@ -40,9 +40,9 @@
 
 ## Install
 
-Speedline is meant to be installed from the Microsoft Store. See [STORE.md](STORE.md) for how it is packaged and published.
+Get Speedline from the Microsoft Store: https://apps.microsoft.com/detail/9NX12SC6603P
 
-Windows Smart App Control blocks any program that is not digitally signed, and gives no "Run anyway" option. A plain build of this project, or the unsigned `.exe` attached to the v1.0.0 release, is therefore blocked on PCs where Smart App Control is on. The Store package is signed by Microsoft.
+Windows Smart App Control blocks programs that are not digitally signed, so a build made from this source is blocked on PCs where it is on. The Store package is signed by Microsoft.
 
 ## Build
 
@@ -58,7 +58,7 @@ To build a folder you can run anywhere without installing .NET:
 dotnet publish WifiSpeedWidget -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true
 ```
 
-To build the package for the Store, see [STORE.md](STORE.md).
+To build the package for the Store, see [PACKAGING.md](PACKAGING.md).
 
 ## Checks
 
