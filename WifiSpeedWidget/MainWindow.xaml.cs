@@ -67,9 +67,14 @@ public partial class MainWindow : Window
         Closing += (_, e) =>
         {
             SavePlacement();
-            if (App.Exiting || Application.Current is not App { Tray.Visible: true }) return;
+            if (App.Exiting || Application.Current is not App { Tray: { Visible: true } tray }) return;
             e.Cancel = true;
             Hide();
+            if (_settings.TrayHintShown) return;
+            _settings.TrayHintShown = true;
+            _settings.Save();
+            tray.ShowNotice($"{AppInfo.Name} is still running",
+                "Click its icon in the notification area to bring the widget back. Right-click the icon to exit.");
         };
         Closed += (_, _) =>
         {
@@ -199,7 +204,21 @@ public partial class MainWindow : Window
             StatusLine.Text = $"Tested {Relative(last)}";
         else
             StatusLine.Text = "No tests yet";
+        UpdateTray();
     }
+
+    public string TrayText
+    {
+        get
+        {
+            if (_testCts != null) return $"{AppInfo.Name}\nTesting your speed…";
+            if (_settings is { LastDown: { } down, LastUp: { } up, LastRun: { } last })
+                return $"{AppInfo.Name}\nDownload {FormatMbps(down)} Mbps  ·  Upload {FormatMbps(up)} Mbps\nTested {Relative(last)}";
+            return $"{AppInfo.Name}\nNo tests yet";
+        }
+    }
+
+    private void UpdateTray() => (Application.Current as App)?.Tray?.SetTooltip(TrayText);
 
     private void UpdateNextText()
     {
@@ -329,6 +348,7 @@ public partial class MainWindow : Window
         UploadValue.SetResourceReference(TextElement.ForegroundProperty, "TextPrimary");
         if (on) StatusLine.Text = "Starting test…";
         UpdateNextText();
+        UpdateTray();
     }
 
     private void OnTestProgress(TestProgress p)
@@ -502,8 +522,22 @@ public partial class MainWindow : Window
         var adapter = _monitor.Adapter;
         var isWireless = adapter?.NetworkInterfaceType == NetworkInterfaceType.Wireless80211;
         var wifi = adapter == null || isWireless ? await NetworkMonitor.GetWifiInfoAsync() : null;
+        ApplyWifi(wifi, adapter);
+    }
 
-        if (wifi != null)
+    private void ApplyWifi(WifiInfo? wifi, NetworkInterface? adapter)
+    {
+        var isWireless = adapter?.NetworkInterfaceType == NetworkInterfaceType.Wireless80211;
+        WifiNameItem.Visibility = wifi is { NameHidden: true } ? Visibility.Visible : Visibility.Collapsed;
+
+        if (wifi is { NameHidden: true })
+        {
+            NetworkName.Text = "Wi-Fi";
+            _wifiDetail = "Name hidden";
+            NetworkName.ToolTip = "Windows only shares the Wi-Fi name with apps that are allowed to use location. Right-click the widget and choose Show Wi-Fi name.";
+            SetSignal(null, false, false);
+        }
+        else if (wifi != null)
         {
             NetworkName.Text = string.IsNullOrWhiteSpace(wifi.Ssid) ? "Wi-Fi" : wifi.Ssid;
             var parts = new List<string>();
@@ -651,15 +685,19 @@ public partial class MainWindow : Window
     {
         var version = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "";
         MessageBox.Show(this,
-            $"{AppInfo.Name} {version}\n\nSpeed tests use the open Measurement Lab network. Measurement Lab publishes test results, including your IP address, as open data. It allows 40 tests a day from one connection, so automatic tests run every few hours.\n\nConnection quality checks send small pings to 1.1.1.1 and 8.8.8.8.",
+            $"{AppInfo.Name} {version}\n\nSpeed tests use the open Measurement Lab network. Measurement Lab publishes test results, including your IP address, as open data. It allows 40 tests a day from one connection, so automatic tests run every few hours.\n\nConnection quality checks send small pings to 1.1.1.1 and 8.8.8.8.\n\nClosing the widget keeps {AppInfo.Name} running in the notification area. Right-click its icon there to exit.",
             "About " + AppInfo.Name, MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    private void OnPrivacy(object sender, RoutedEventArgs e)
+    private void OnPrivacy(object sender, RoutedEventArgs e) => OpenLink(AppInfo.PrivacyUrl);
+
+    private void OnShowWifiName(object sender, RoutedEventArgs e) => OpenLink("ms-settings:privacy-location");
+
+    private static void OpenLink(string target)
     {
         try
         {
-            Process.Start(new ProcessStartInfo(AppInfo.PrivacyUrl) { UseShellExecute = true });
+            Process.Start(new ProcessStartInfo(target) { UseShellExecute = true });
         }
         catch (Exception ex)
         {

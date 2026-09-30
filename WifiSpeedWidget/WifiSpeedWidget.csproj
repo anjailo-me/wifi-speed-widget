@@ -18,6 +18,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Content Include="Assets\tray-dark.ico;Assets\tray-light.ico" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>PrivacyPolicyUrl</_Parameter1>
       <_Parameter2>$(PrivacyPolicyUrl)</_Parameter2>

@@ -1,6 +1,6 @@
 # Automated checks
 
-These checks run the real Speedline code and drive the real widget window, so they catch problems a compile cannot. They cover settings and the daily test limit, the network, Wi-Fi and ping monitors, the speed tester, cancelling, servers that fail in different ways, every menu and schedule choice in the window, closing during a test, and a 2.5-minute soak that watches memory, handles, threads and window freezes. A full run takes about nine minutes.
+These checks run the real Speedline code and drive the real widget window, so they catch problems a compile cannot. They cover settings and the daily test limit, the network, Wi-Fi and ping monitors, the speed tester, cancelling, servers that fail in different ways, every menu and schedule choice in the window, the system tray icon (hiding, bringing the widget back, its tooltip and the one-time notice), a Wi-Fi name that Windows hides, and a 2.5-minute soak that watches memory, handles, threads and window freezes. A full run takes about nine minutes.
 
 ## Run them
 

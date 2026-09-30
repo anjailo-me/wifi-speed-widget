@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 
 namespace WifiSpeedWidget;
 
-public record WifiInfo(string? Ssid, int? SignalPercent, string? LinkRate, string? Band);
+public record WifiInfo(string? Ssid, int? SignalPercent, string? LinkRate, string? Band, bool NameHidden = false);
 
 public sealed class NetworkMonitor
 {
@@ -126,35 +126,43 @@ public sealed class NetworkMonitor
                 return null;
             }
 
-            string? ssid = null;
-            int? signal = null;
-            string? rate = null;
-            string? band = null;
-
-            foreach (var raw in output.Split('\n'))
-            {
-                var line = raw.Trim();
-                var idx = line.IndexOf(':');
-                if (idx < 0) continue;
-                var key = line[..idx].Trim();
-                var value = line[(idx + 1)..].Trim();
-
-                if (ssid == null && Regex.IsMatch(key, @"^SSID$", RegexOptions.IgnoreCase))
-                    ssid = value;
-                else if (signal == null && Regex.Match(value, @"^(\d{1,3})\s*%$") is { Success: true } m)
-                    signal = int.Parse(m.Groups[1].Value);
-                else if (rate == null && key.Contains("(Mbps)") && key.Contains("Receive", StringComparison.OrdinalIgnoreCase))
-                    rate = value;
-                else if (band == null && key.Equals("Band", StringComparison.OrdinalIgnoreCase))
-                    band = value;
-            }
-
-            if (ssid == null && signal == null) return null;
-            return new WifiInfo(ssid, signal, rate, band);
+            return ParseWifi(output);
         }
         catch
         {
             return null;
         }
+    }
+
+    public static WifiInfo? ParseWifi(string output)
+    {
+        if (output.Contains("privacy-location", StringComparison.OrdinalIgnoreCase))
+            return new WifiInfo(null, null, null, null, true);
+
+        string? ssid = null;
+        int? signal = null;
+        string? rate = null;
+        string? band = null;
+
+        foreach (var raw in output.Split('\n'))
+        {
+            var line = raw.Trim();
+            var idx = line.IndexOf(':');
+            if (idx < 0) continue;
+            var key = line[..idx].Trim();
+            var value = line[(idx + 1)..].Trim();
+
+            if (ssid == null && Regex.IsMatch(key, @"^SSID$", RegexOptions.IgnoreCase))
+                ssid = value;
+            else if (signal == null && Regex.Match(value, @"^(\d{1,3})\s*%$") is { Success: true } m)
+                signal = int.Parse(m.Groups[1].Value);
+            else if (rate == null && key.Contains("(Mbps)") && key.Contains("Receive", StringComparison.OrdinalIgnoreCase))
+                rate = value;
+            else if (band == null && key.Equals("Band", StringComparison.OrdinalIgnoreCase))
+                band = value;
+        }
+
+        if (ssid == null && signal == null) return null;
+        return new WifiInfo(ssid, signal, rate, band);
     }
 }

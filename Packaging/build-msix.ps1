@@ -4,7 +4,7 @@ param(
     [string]$PublisherDisplayName = "Speedline",
     [string]$DisplayName = "Speedline",
     [string]$PrivacyUrl = "",
-    [string]$Version = "1.1.0.0",
+    [string]$Version = "1.2.0.0",
     [string]$OutDir = (Join-Path $PSScriptRoot "..\dist")
 )
 
@@ -56,7 +56,9 @@ if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
 
 $assets = Join-Path $PSScriptRoot "Assets"
 if (-not (Test-Path $assets)) { throw "Package assets are missing. Run Packaging\make-assets.ps1 first." }
-Copy-Item $assets (Join-Path $layout "Assets") -Recurse -Force
+$layoutAssets = Join-Path $layout "Assets"
+New-Item -ItemType Directory -Force $layoutAssets | Out-Null
+Copy-Item (Join-Path $assets "*") $layoutAssets -Recurse -Force
 
 Add-Type -AssemblyName System.Security
 function Escape([string]$value) { [System.Security.SecurityElement]::Escape($value) }

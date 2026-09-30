@@ -46,6 +46,7 @@
     <Window.ContextMenu>
         <ContextMenu x:Name="MainMenu">
             <MenuItem x:Name="TestMenuItem" Header="Test now" Click="OnRunTest"/>
+            <MenuItem x:Name="WifiNameItem" Header="Show Wi-Fi name…" Click="OnShowWifiName" Visibility="Collapsed"/>
             <Separator/>
             <MenuItem x:Name="TopmostItem" Header="Keep on top" IsCheckable="True" Click="OnToggleTopmost"/>
             <MenuItem x:Name="StartupItem" Header="Start with Windows" IsCheckable="True" Click="OnToggleStartup"/>

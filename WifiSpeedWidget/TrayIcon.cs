@@ -1,6 +1,8 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using Microsoft.Win32;
 
 namespace WifiSpeedWidget;
 
@@ -11,19 +13,28 @@ public sealed class TrayIcon : IDisposable
     private const int NinKeySelect = 0x0403;
     private const int WmContextMenu = 0x007B;
     private const uint NimAdd = 0;
+    private const uint NimModify = 1;
     private const uint NimDelete = 2;
     private const uint NimSetVersion = 4;
-    private const uint NifMessage = 1;
-    private const uint NifIcon = 2;
-    private const uint NifTip = 4;
+    private const uint NifMessage = 0x01;
+    private const uint NifIcon = 0x02;
+    private const uint NifTip = 0x04;
+    private const uint NifInfo = 0x10;
+    private const uint NifShowTip = 0x80;
+    private const uint NiifRespectQuietTime = 0x80;
     private const uint MfString = 0;
     private const uint MfSeparator = 0x800;
     private const uint TpmReturnCmd = 0x100;
     private const uint TpmRightButton = 0x2;
     private const uint TpmBottomAlign = 0x20;
+    private const uint ImageIcon = 1;
+    private const uint LrLoadFromFile = 0x10;
+    private const int SmCxSmIcon = 49;
     private const int CmdShow = 1;
     private const int CmdTest = 2;
     private const int CmdExit = 3;
+
+    private static string AssetsDir = Path.Combine(AppContext.BaseDirectory, "Assets");
 
     private readonly MainWindow _window;
     private readonly HwndSource _source;
@@ -33,10 +44,14 @@ public sealed class TrayIcon : IDisposable
     private NotifyIconData _data;
 
     public bool Visible { get; private set; }
+    public bool ThemedIcon { get; private set; }
+    public string Tooltip { get; private set; }
+    public int NoticesShown { get; private set; }
 
     public TrayIcon(MainWindow window)
     {
         _window = window;
+        Tooltip = window.TrayText;
         _taskbarCreated = RegisterWindowMessage("TaskbarCreated");
         _source = new HwndSource(new HwndSourceParameters("SpeedlineTray")
         {
@@ -48,19 +63,56 @@ public sealed class TrayIcon : IDisposable
         _source.AddHook(WndProc);
         LoadIcon();
         Add();
+        Theme.Changed += OnThemeChanged;
+    }
+
+    private static bool TaskbarIsLight()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            return key?.GetValue("SystemUsesLightTheme") is int v && v == 1;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void LoadIcon()
     {
+        var size = GetSystemMetrics(SmCxSmIcon);
+        var file = Path.Combine(AssetsDir, TaskbarIsLight() ? "tray-light.ico" : "tray-dark.ico");
+        if (File.Exists(file))
+        {
+            var themed = LoadImage(IntPtr.Zero, file, ImageIcon, size, size, LrLoadFromFile);
+            if (themed != IntPtr.Zero)
+            {
+                SetIcon(themed, true);
+                ThemedIcon = true;
+                return;
+            }
+        }
+        ThemedIcon = false;
         var path = Environment.ProcessPath;
         if (path != null && ExtractIconEx(path, 0, IntPtr.Zero, out var small, 1) > 0 && small != IntPtr.Zero)
         {
-            _icon = small;
-            _ownsIcon = true;
+            SetIcon(small, true);
             return;
         }
-        _icon = LoadIcon(IntPtr.Zero, new IntPtr(32512));
+        SetIcon(LoadIcon(IntPtr.Zero, new IntPtr(32512)), false);
     }
+
+    private void SetIcon(IntPtr icon, bool owned)
+    {
+        var old = _icon;
+        var oldOwned = _ownsIcon;
+        _icon = icon;
+        _ownsIcon = owned;
+        if (oldOwned && old != IntPtr.Zero) DestroyIcon(old);
+    }
+
+    private static string Clip(string text, int max) => text.Length < max ? text : text[..(max - 1)];
 
     private void Add()
     {
@@ -69,10 +121,10 @@ public sealed class TrayIcon : IDisposable
             cbSize = Marshal.SizeOf<NotifyIconData>(),
             hWnd = _source.Handle,
             uID = 1,
-            uFlags = NifMessage | NifIcon | NifTip,
+            uFlags = NifMessage | NifIcon | NifTip | NifShowTip,
             uCallbackMessage = CallbackMessage,
             hIcon = _icon,
-            szTip = AppInfo.Name,
+            szTip = Clip(Tooltip, 128),
             szInfo = "",
             szInfoTitle = ""
         };
@@ -84,10 +136,44 @@ public sealed class TrayIcon : IDisposable
         }
     }
 
+    private void Modify(uint flags)
+    {
+        if (!Visible) return;
+        _data.uFlags = flags;
+        _data.hIcon = _icon;
+        _data.szTip = Clip(Tooltip, 128);
+        Shell_NotifyIcon(NimModify, ref _data);
+    }
+
+    public void SetTooltip(string text)
+    {
+        if (text == Tooltip) return;
+        Tooltip = text;
+        Modify(NifTip | NifShowTip);
+    }
+
+    public void ShowNotice(string title, string text)
+    {
+        if (!Visible) return;
+        var notice = _data;
+        notice.uFlags = NifInfo;
+        notice.szInfoTitle = Clip(title, 64);
+        notice.szInfo = Clip(text, 256);
+        notice.dwInfoFlags = NiifRespectQuietTime;
+        if (Shell_NotifyIcon(NimModify, ref notice)) NoticesShown++;
+    }
+
+    private void OnThemeChanged()
+    {
+        LoadIcon();
+        Modify(NifIcon | NifTip | NifShowTip);
+    }
+
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == _taskbarCreated)
         {
+            LoadIcon();
             Add();
             return IntPtr.Zero;
         }
@@ -136,6 +222,7 @@ public sealed class TrayIcon : IDisposable
 
     public void Dispose()
     {
+        Theme.Changed -= OnThemeChanged;
         if (Visible)
         {
             Shell_NotifyIcon(NimDelete, ref _data);
@@ -143,8 +230,7 @@ public sealed class TrayIcon : IDisposable
         }
         _source.RemoveHook(WndProc);
         _source.Dispose();
-        if (_ownsIcon && _icon != IntPtr.Zero) DestroyIcon(_icon);
-        _icon = IntPtr.Zero;
+        SetIcon(IntPtr.Zero, false);
     }
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -179,6 +265,12 @@ public sealed class TrayIcon : IDisposable
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern uint ExtractIconEx(string file, int index, IntPtr large, out IntPtr small, uint count);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern IntPtr LoadImage(IntPtr instance, string name, uint type, int cx, int cy, uint load);
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern uint RegisterWindowMessage(string name);

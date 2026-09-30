@@ -24,6 +24,7 @@ public sealed class WidgetSettings
     public int AutoTestMinutes { get; set; } = 360;
     public List<TestRecord> History { get; set; } = new();
     public List<DateTime> TestStarts { get; set; } = new();
+    public bool TrayHintShown { get; set; }
 
     public const int DailyTestLimit = 40;
     public const int AutoDailyLimit = 30;

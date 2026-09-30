@@ -189,10 +189,17 @@ public static class Harness
             Check($"saved interval {input} becomes {expected}", s.AutoTestMinutes == expected, $"got {s.AutoTestMinutes}");
         }
 
+        Check("new settings default to every 6 hours", new WidgetSettings().AutoTestMinutes == 360);
         File.Delete(SettingsPath);
-        var fresh = WidgetSettings.Load();
-        Check("no settings file gives a 6 hour default", fresh.AutoTestMinutes == 360,
-            $"got {fresh.AutoTestMinutes}; file still exists after delete: {File.Exists(SettingsPath)}");
+        if (File.Exists(SettingsPath))
+        {
+            Skip("no settings file gives a 6 hour default", "the settings file could not be removed here, which happens when the checks run inside another packaged app");
+        }
+        else
+        {
+            var fresh = WidgetSettings.Load();
+            Check("no settings file gives a 6 hour default", fresh.AutoTestMinutes == 360, $"got {fresh.AutoTestMinutes}");
+        }
 
         File.WriteAllText(SettingsPath, "{this is not json");
         var bak = SettingsPath + ".bak";
@@ -251,6 +258,34 @@ public static class Harness
             Check("signal is 0-100", wifi.SignalPercent is >= 0 and <= 100, $"{wifi.SignalPercent}");
             Notes.Add($"wifi: signal {wifi.SignalPercent}% band {wifi.Band} link {wifi.LinkRate}");
         }
+
+        var sample = string.Join("\n",
+            "There is 1 interface on the system:",
+            "    Name                   : Wi-Fi",
+            "    State                  : connected",
+            "    SSID                   : Home Network",
+            "    BSSID                  : 00:11:22:33:44:55",
+            "    Band                   : 5 GHz",
+            "    Receive rate (Mbps)    : 866.7",
+            "    Transmit rate (Mbps)   : 866.7",
+            "    Signal                 : 82% ");
+        var parsed = NetworkMonitor.ParseWifi(sample);
+        Check("netsh output is parsed into name, band, signal and link rate",
+            parsed is { Ssid: "Home Network", Band: "5 GHz", SignalPercent: 82, LinkRate: "866.7", NameHidden: false },
+            parsed?.ToString() ?? "null");
+        var denied = string.Join("\n",
+            "Network shell commands need location permission to access WLAN information. Turn on Location services on the Location page in Privacy & security settings.",
+            "",
+            "Here is the URI for the Location page in the Settings app:",
+            "ms-settings:privacy-location",
+            "To open the Location page in the Settings app, hold down the Ctrl key and select the link or run the following command:",
+            "start ms-settings:privacy-location",
+            "?",
+            "Function WlanQueryInterface returns error 5:",
+            "The requested operation requires elevation (Run as administrator).");
+        Check("a Windows location refusal is recognised as a hidden network name",
+            NetworkMonitor.ParseWifi(denied) is { NameHidden: true, Ssid: null });
+        Check("output with no Wi-Fi details gives nothing", NetworkMonitor.ParseWifi("There is 0 interface on the system:") == null);
     }
 
     private static async Task TestPing()
@@ -539,6 +574,8 @@ public static class Harness
         Environment.SetEnvironmentVariable("SPEEDLINE_INSTANCE_SUFFIX", ".checks");
         _mlabOk = true;
         File.WriteAllText(SettingsPath, "{\"AutoTestMinutes\": 360, \"Topmost\": true}");
+        if (Environment.GetEnvironmentVariable("SPEEDLINE_APP_DIR") is { Length: > 0 } appDir)
+            typeof(TrayIcon).GetField("AssetsDir", BindingFlags.NonPublic | BindingFlags.Static)!.SetValue(null, Path.Combine(appDir, "Assets"));
         try { Application.ResourceAssembly = typeof(App).Assembly; } catch (InvalidOperationException) { }
         var app = new App();
         app.InitializeComponent();
@@ -623,6 +660,17 @@ public static class Harness
         Check("live ping is numeric", int.TryParse(ping.Text, out var p) && p > 0, ping.Text);
         Check("jitter is numeric", int.TryParse(jitter.Text, out _), jitter.Text);
         Check("countdown to the first test is shown", nextText.Text.Contains("next in"), nextText.Text);
+        var wifiNameItem = Find<MenuItem>(w, "WifiNameItem");
+        var networkDetail = Find<TextBlock>(w, "NetworkDetail");
+        Check("the Show Wi-Fi name item is hidden while Windows shares the name", wifiNameItem.Visibility == Visibility.Collapsed);
+        var applyWifi = typeof(MainWindow).GetMethod("ApplyWifi", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var monitor = (NetworkMonitor)GetField(w, "_monitor");
+        applyWifi.Invoke(w, new object?[] { new WifiInfo(null, null, null, null, true), monitor.Adapter });
+        Check("a hidden Wi-Fi name shows as Wi-Fi", network.Text == "Wi-Fi", network.Text);
+        Check("a hidden Wi-Fi name is explained on the status line", networkDetail.Text.Contains("Name hidden"), networkDetail.Text);
+        Check("a hidden Wi-Fi name offers Show Wi-Fi name in the menu", wifiNameItem.Visibility == Visibility.Visible);
+        await (Task)typeof(MainWindow).GetMethod("UpdateWifiAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(w, null)!;
+        Check("the real network name comes back once Windows shares it", network.Text != "Wi-Fi" && wifiNameItem.Visibility == Visibility.Collapsed, network.Text);
         Shot(w, "ui-1-idle");
 
         if (_mlabOk)
@@ -803,22 +851,27 @@ public static class Harness
         watchdog.Stop();
 
         _phase = "closing";
+        var tray = ((App)app).Tray;
+        Check("the tray icon is showing", tray is { Visible: true });
+        Check("the tray icon uses the glyph that matches the taskbar theme", tray is { ThemedIcon: true });
+        Check("the tray tooltip shows the latest result", tray?.Tooltip.Contains("Download") == true && tray.Tooltip.Contains("Tested"), tray?.Tooltip ?? "");
         if (_mlabOk)
         {
             Click(run);
             await WaitFor(() => run.Content?.ToString() == "Stop", 3);
             await Task.Delay(3000);
         }
-        var tray = ((App)app).Tray;
-        Check("the tray icon is showing", tray is { Visible: true });
+        if (_mlabOk) Check("the tray tooltip says a test is running", tray?.Tooltip.Contains("Testing") == true, tray?.Tooltip ?? "");
         w.Close();
         Check("closing the widget hides it instead of quitting", await WaitFor(() => !w.IsVisible, 3));
+        Check("the first close shows a notice that the app is still running", tray is { NoticesShown: 1 } && settings.TrayHintShown, $"{tray?.NoticesShown} notices");
         Check("the tray icon stays after the widget is closed", ((App)app).Tray is { Visible: true });
         if (_mlabOk) Check("a test in progress keeps running while the widget is hidden", w.IsTesting);
         w.ShowWidget();
         Check("the tray icon brings the widget back", await WaitFor(() => w.IsVisible, 3));
         w.Close();
         await WaitFor(() => !w.IsVisible, 3);
+        Check("the notice is shown only once", tray is { NoticesShown: 1 }, $"{tray?.NoticesShown} notices");
         using (var signal = EventWaitHandle.OpenExisting(App.ShowSignalName)) signal.Set();
         Check("starting the app again brings the hidden widget back", await WaitFor(() => w.IsVisible, 5));
         ((App)app).ExitApp();

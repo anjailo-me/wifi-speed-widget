@@ -36,7 +36,7 @@
 - Follows the Windows light/dark theme and accent color
 - Remembers its position, even across monitors with different scaling
 - Optional always-on-top and start with Windows
-- Closing the widget hides it to a tray icon: click the icon to bring it back, or right-click it to test or exit
+- Closing the widget hides it to a tray icon that matches your taskbar theme: hover it for your latest result, click it to bring the widget back, or right-click it to test or exit
 
 ## Install
 

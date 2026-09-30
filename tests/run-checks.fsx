@@ -51,6 +51,7 @@ if not (File.Exists appDll) then
 if not (File.Exists checksDll) then
     failwithf "Build the checks first: dotnet build tests\\SpeedlineChecks\\SpeedlineChecks.csproj -c Release (looked for %s)" checksDll
 
+Environment.SetEnvironmentVariable("SPEEDLINE_APP_DIR", appDir)
 let ctx = CheckContext()
 ctx.App <- ctx.LoadFromStream(new MemoryStream(File.ReadAllBytes appDll))
 ctx.Checks <- ctx.LoadFromStream(new MemoryStream(File.ReadAllBytes checksDll))
