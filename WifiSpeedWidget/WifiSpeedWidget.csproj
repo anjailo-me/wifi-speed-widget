@@ -10,10 +10,11 @@
     <AppDisplayName Condition="'$(AppDisplayName)' == ''">Speedline</AppDisplayName>
     <Product>$(AppDisplayName)</Product>
     <AssemblyTitle>$(AppDisplayName)</AssemblyTitle>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>

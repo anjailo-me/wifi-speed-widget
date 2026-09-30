@@ -536,6 +536,7 @@ public static class Harness
 
     private static void TestUi()
     {
+        Environment.SetEnvironmentVariable("SPEEDLINE_INSTANCE_SUFFIX", ".checks");
         _mlabOk = true;
         File.WriteAllText(SettingsPath, "{\"AutoTestMinutes\": 360, \"Topmost\": true}");
         try { Application.ResourceAssembly = typeof(App).Assembly; } catch (InvalidOperationException) { }
@@ -553,7 +554,10 @@ public static class Harness
             catch (Exception ex) { Check("UI scenario ran to the end", false, ex.ToString()); }
             finally { app.Shutdown(); }
         }, DispatcherPriority.ApplicationIdle);
+        var exited = false;
+        app.Exit += (_, _) => exited = true;
         app.Run();
+        Check(_mlabOk ? "exiting from the tray menu quits the app, even during a test" : "exiting from the tray menu quits the app", exited);
         Check("no unhandled exceptions reached the UI thread", unhandled.Count == 0, string.Join(" | ", unhandled));
     }
 
@@ -805,12 +809,18 @@ public static class Harness
             await WaitFor(() => run.Content?.ToString() == "Stop", 3);
             await Task.Delay(3000);
         }
-        var closeTimer = Stopwatch.StartNew();
-        var closed = false;
-        w.Closed += (_, _) => closed = true;
+        var tray = ((App)app).Tray;
+        Check("the tray icon is showing", tray is { Visible: true });
         w.Close();
-        Check(_mlabOk ? "closing the window during a test works" : "closing the window works", await WaitFor(() => closed, 5), $"{closeTimer.Elapsed.TotalSeconds:F1}s");
-        await Task.Delay(1500);
-        Check("no unhandled UI exceptions during close", unhandled.Count == 0, string.Join(" | ", unhandled));
+        Check("closing the widget hides it instead of quitting", await WaitFor(() => !w.IsVisible, 3));
+        Check("the tray icon stays after the widget is closed", ((App)app).Tray is { Visible: true });
+        if (_mlabOk) Check("a test in progress keeps running while the widget is hidden", w.IsTesting);
+        w.ShowWidget();
+        Check("the tray icon brings the widget back", await WaitFor(() => w.IsVisible, 3));
+        w.Close();
+        await WaitFor(() => !w.IsVisible, 3);
+        using (var signal = EventWaitHandle.OpenExisting(App.ShowSignalName)) signal.Set();
+        Check("starting the app again brings the hidden widget back", await WaitFor(() => w.IsVisible, 5));
+        ((App)app).ExitApp();
     }
 }

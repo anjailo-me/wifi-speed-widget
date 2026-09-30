@@ -64,12 +64,18 @@ public partial class MainWindow : Window
             await UpdateWifiAsync();
             await UpdatePingAsync();
         };
-        Closing += (_, _) =>
+        Closing += (_, e) =>
+        {
+            SavePlacement();
+            if (App.Exiting || Application.Current is not App { Tray.Visible: true }) return;
+            e.Cancel = true;
+            Hide();
+        };
+        Closed += (_, _) =>
         {
             _testCts?.Cancel();
-            SavePlacement();
+            Theme.Changed -= OnThemeChanged;
         };
-        Closed += (_, _) => Theme.Changed -= OnThemeChanged;
         Theme.Changed += OnThemeChanged;
 
         MainMenu.Opened += (_, _) =>
@@ -89,6 +95,17 @@ public partial class MainWindow : Window
                 item.IsChecked = item.Tag is string tag && int.Parse(tag) == _settings.AutoTestMinutes;
         };
     }
+
+    public bool IsTesting => _testCts != null;
+
+    public void ShowWidget()
+    {
+        if (!IsVisible) Show();
+        if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    public void ToggleTest() => OnRunTest(this, new RoutedEventArgs());
 
     protected override void OnSourceInitialized(EventArgs e)
     {

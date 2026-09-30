@@ -66,6 +66,7 @@ Description:
 > - A history of your recent tests
 > - Pauses automatic tests on metered connections
 > - Drag it anywhere, keep it on top, and start it with Windows
+> - Close the widget and it waits in the system tray, one click from coming back
 > - Follows your Windows light or dark theme and accent color
 >
 > Speed tests use the open Measurement Lab (M-Lab) network. There is no account, no ads and no tracking.
@@ -98,12 +99,12 @@ Choose Submit to the Store. Review usually takes a few days. You are told by ema
 
 ## What has been tested
 
-The repository has an automated check kit in [tests](tests). It runs the real code and drives the real widget window. The last full run on the final build gave 147 passed, 0 failed and 1 skipped:
+The repository has an automated check kit in [tests](tests). It runs the real code and drives the real widget window. The last full run, on version 1.1.0, gave 147 passed, 0 failed and 1 skipped. Version 1.2.0 added the system tray icon and changed how closing works, and its window walkthrough (about 85 checks, including hiding to the tray, the tray icon bringing the widget back, starting the app a second time bringing it back, and exiting during a test) passes. The settings, network and speed-test code was not changed in 1.2.0, so those parts were not re-run.
 
 - Settings: interval migration and defaults, recovery from a corrupt file, save and reload, and the counting of tests against the daily limit.
 - Network, Wi-Fi and ping monitors on a live connection.
 - Speed tests against a local stand-in for the M-Lab service: full runs, progress order, latency and rate values checked against what the server sent, cancelling mid-test, a test right after a cancel, servers that send no measurements, drop the connection after 3 or 7 seconds, answer "busy" or return no servers, and unreachable servers failing cleanly.
-- The widget window: first automatic test, status text through every stage, all four schedule choices, Test now and Stop, the busy and no-server messages, the daily limits (manual 40, automatic 30), Clear history, Keep on top, saved position, closing during a test, and a 150-second soak (managed memory flat at about 59 MB, handles and threads flat, the worst UI pause was 131 ms).
+- The widget window: first automatic test, status text through every stage, all four schedule choices, Test now and Stop, the busy and no-server messages, the daily limits (manual 40, automatic 30), Clear history, Keep on top, saved position, the tray icon behaviour, and a 150-second soak (managed memory flat at about 59 MB, handles and threads flat, the worst UI pause was 313 ms).
 
 The stand-in server is used because M-Lab allows only 40 tests a day per connection and had already started refusing this PC after earlier testing. The one skipped check is the run against the real M-Lab servers. Earlier builds of the speed engine were checked against the real service, but the final code was not. Run `CHECKS_LIVE=1` (see [tests/README.md](tests/README.md)) once M-Lab accepts your connection again, before you submit.
 
