@@ -4,3 +4,34 @@ obj/
 *.user
 dist/
 tests/out/
+
+# personal data and local app state
+settings.json
+settings.json.bak
+errors.log
+*.log
+tests/out/
+brag-output*/
+
+# signing keys, certificates and credentials
+*.pfx
+*.p12
+*.cer
+*.crt
+*.pem
+*.key
+*.snk
+*.publishsettings
+.env
+.env.*
+secrets.*
+*.local.*
+
+# built packages and installers
+*.msix
+*.msixbundle
+*.msixupload
+*.appx
+*.exe
+*.msi
+Packaging/layout/
